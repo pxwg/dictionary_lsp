@@ -4,7 +4,9 @@
 
 ## 介绍
 
-![示意图](./fig/showcase.png)
+<div align="center">
+  <img src="./fig/showcase.png" alt="示意图">
+</div>
 
 Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查询系统，可以使用`textDocument/hover`帮助你在 neovim 中快速查询单词释义。这是一个随作者成长会不断更新的项目，之后也许会基于 LSP 的特性更新更多的功能😆
 
