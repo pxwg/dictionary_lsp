@@ -199,6 +199,8 @@ impl DictionaryLsp {
 
     /// Handles hover events by finding the word at the cursor position
     /// and fetching its dictionary definition.
+    /// TODO: Add support for SQLite database lookups
+    /// TODO: Add support for multiple dictionary sources
     async fn on_hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let position = params.text_document_position_params.position;
         let document_uri = params.text_document_position_params.text_document.uri;
@@ -220,7 +222,7 @@ impl DictionaryLsp {
                     let mut markdown = format!("**{}**\n\n", word);
 
                     for meaning in &response.meanings {
-                        markdown.push_str(&format!("_{}_\n\n", meaning.part_of_speech));
+                        markdown.push_str(&format!("_{}_\n", meaning.part_of_speech));
 
                         for (i, definition) in meaning.definitions.iter().enumerate() {
                             markdown.push_str(&format!("{}. {}\n", i + 1, definition.definition));
@@ -229,7 +231,6 @@ impl DictionaryLsp {
                                 markdown.push_str(&format!("   > Example: _{}_\n", example));
                             }
                         }
-                        markdown.push_str("\n");
                     }
 
                     let contents = HoverContents::Markup(MarkupContent {
