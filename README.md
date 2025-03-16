@@ -69,8 +69,9 @@ add_spacing = true
 - [x] 自定义 textDocument/hover 请求的返回文本格式⭐
 - [x] 支持 textDocument/signatureHelp 请求⭐(初步支持)
 - [ ] 模糊查找 + 自动补全⭐
+- [ ] 添加单元测试⭐
 - [x] 配置文件指定字典位置
-- [ ] 支持 SQLite 数据库
+- [ ] 支持 SQLite 数据库⭐
 - [ ] 支持 csv 等格式的字典转换
 - [ ] 实现 neovim 的兼容层，实现在文件编辑时主动添加生词、统计查询频率并调用等功能 (强烈依赖于 SQLite 的实现)⭐
 
