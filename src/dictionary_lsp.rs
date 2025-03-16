@@ -140,7 +140,7 @@ impl DictionaryLsp {
     /// Retrieves the dictionary definition for a given word.
     /// Reads from a local JSON dictionary file and parses the entries.
     async fn get_meaning(&self, word: &str) -> Result<Option<DictionaryResponse>> {
-        // Use a static or cached dictionary path instead of hardcoding
+        //TODO: Use a static or cached dictionary path instead of hardcoding
         let dict_path = std::path::PathBuf::from("/Users/pxwg-dogggie/dicts/dictionary.json");
 
         if !dict_path.exists() {
