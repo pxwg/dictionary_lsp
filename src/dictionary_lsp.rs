@@ -1,3 +1,5 @@
+use crate::config::Config;
+use crate::formatting;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio;
@@ -23,27 +25,28 @@ fn is_cjk_char(c: char) -> bool {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct DictionaryResponse {
-    word: String,
-    meanings: Vec<Meaning>,
+pub struct DictionaryResponse {
+    pub word: String,
+    pub meanings: Vec<Meaning>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Meaning {
-    part_of_speech: String,
-    definitions: Vec<Definition>,
+pub struct Meaning {
+    pub part_of_speech: String,
+    pub definitions: Vec<Definition>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Definition {
-    definition: String,
-    example: Option<String>,
+pub struct Definition {
+    pub definition: String,
+    pub example: Option<String>,
 }
 
 #[derive(Debug)]
 struct DictionaryLsp {
     client: Client,
     document_map: Mutex<HashMap<Url, String>>,
+    config: Config,
 }
 
 #[tower_lsp::async_trait]
@@ -219,19 +222,11 @@ impl DictionaryLsp {
             match self.get_meaning(&word).await {
                 Ok(Some(response)) => {
                     // Format the response as Markdown
-                    let mut markdown = format!("**{}**\n", word);
-
-                    for meaning in &response.meanings {
-                        markdown.push_str(&format!("_{}_\n", meaning.part_of_speech));
-
-                        for (i, definition) in meaning.definitions.iter().enumerate() {
-                            markdown.push_str(&format!("{}. {}\n", i + 1, definition.definition));
-
-                            if let Some(example) = &definition.example {
-                                markdown.push_str(&format!("   > Example: _{}_\n", example));
-                            }
-                        }
-                    }
+                    let markdown = formatting::format_definition_as_markdown_with_config(
+                        &word,
+                        &response,
+                        &self.config.formatting,
+                    );
 
                     let contents = HoverContents::Markup(MarkupContent {
                         kind: MarkupKind::Markdown,
@@ -311,6 +306,7 @@ pub async fn run_server() {
     let (service, socket) = LspService::new(|client| DictionaryLsp {
         client,
         document_map: Mutex::new(HashMap::new()),
+        config: Config::get(),
     });
     Server::new(stdin, stdout, socket).serve(service).await;
 }
