@@ -1,8 +1,10 @@
 # Dictionary LSP
 
-个人使用的字典查询系统，基于 LSP 语言服务器实现。
+自用的字典查询系统，基于 LSP 语言服务器与`rust`实现。
 
 ## 介绍
+
+![示意图](./fig/showcase.png)
 
 Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查询系统，可以使用`textDocument/hover`帮助你在 neovim 中快速查询单词释义。这是一个随作者成长会不断更新的项目，之后也许会基于 LSP 的特性更新更多的功能😆
 
