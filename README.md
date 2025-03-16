@@ -29,6 +29,7 @@ Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查�
 
 如果你想要配置预览样式、字典路径等内容，可以参考 (这些不一定是默认配置)
 ```toml
+# ~/.config/dictionary_lsp/config.toml
 dictionary_path = "/path/to/your/dictionary.json"
 [formatting]
 word_format = "**{word}**"
