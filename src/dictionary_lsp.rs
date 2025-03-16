@@ -144,7 +144,17 @@ impl DictionaryLsp {
     /// Reads from a local JSON dictionary file and parses the entries.
     async fn get_meaning(&self, word: &str) -> Result<Option<DictionaryResponse>> {
         //TODO: Use a static or cached dictionary path instead of hardcoding
-        let dict_path = std::path::PathBuf::from("/Users/pxwg-dogggie/dicts/dictionary.json");
+        let dict_path = if let Some(path) = &self.config.dictionary_path {
+            std::path::PathBuf::from(path)
+        } else {
+            match dirs::home_dir().map(|p| p.join("dicts/dictionary.json")) {
+                Some(path) => path,
+                None => {
+                    eprintln!("Could not determine home directory");
+                    return Ok(None);
+                }
+            }
+        };
 
         if !dict_path.exists() {
             eprintln!("Dictionary file not found at {:?}", dict_path);

@@ -6,12 +6,14 @@ use std::path::{Path, PathBuf};
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Config {
     pub formatting: FormattingConfig,
+    pub dictionary_path: Option<String>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             formatting: FormattingConfig::default(),
+            dictionary_path: None,
         }
     }
 }
