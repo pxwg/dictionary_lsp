@@ -7,7 +7,9 @@ use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::lsp_types::{
-    Hover, HoverContents, HoverParams, MarkupContent, MarkupKind, Position,
+    Documentation, Hover, HoverContents, HoverParams, MarkupContent, MarkupKind,
+    ParameterInformation, Position, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    SignatureInformation,
 };
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
@@ -60,6 +62,11 @@ impl LanguageServer for DictionaryLsp {
                     TextDocumentSyncKind::FULL,
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec![" ".to_string()]), // Trigger on space
+                    retrigger_characters: None,
+                    work_done_progress_options: Default::default(),
+                }),
                 ..ServerCapabilities::default()
             },
             ..InitializeResult::default()
@@ -106,6 +113,10 @@ impl LanguageServer for DictionaryLsp {
     /// the word under the cursor.
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         self.on_hover(params).await
+    }
+
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        self.on_signature_help(params).await
     }
 }
 
@@ -305,6 +316,112 @@ impl DictionaryLsp {
         } else {
             Some(chars[start..end].iter().collect())
         }
+    }
+
+    /// Handles signature help requests by finding the word at the cursor position
+    /// and providing its dictionary definition in signature help format.
+    async fn on_signature_help(
+        &self,
+        params: SignatureHelpParams,
+    ) -> Result<Option<SignatureHelp>> {
+        let position = params.text_document_position_params.position;
+        let document_uri = params.text_document_position_params.text_document.uri;
+
+        // Get document content from memory or file system
+        let content = match self.document_map.lock().await.get(&document_uri) {
+            Some(content) => content.clone(),
+            None => match std::fs::read_to_string(document_uri.path()) {
+                Ok(content) => content,
+                Err(_) => return Ok(None),
+            },
+        };
+
+        if let Some(word) = self.get_word_at_position(&content, position) {
+            match self.get_meaning(&word).await {
+                Ok(Some(response)) => {
+                    // Format the entire dictionary response as hover-like content
+                    let value = formatting::format_definition_as_markdown_with_config(
+                        &word,
+                        &response,
+                        &self.config.formatting,
+                    );
+
+                    // HACK: only show the label part of signature help
+                    let signatures = vec![SignatureInformation {
+                        documentation: Some(Documentation::MarkupContent(MarkupContent {
+                            kind: MarkupKind::PlainText,
+                            value: "".to_string(),
+                        })),
+                        label: value,
+                        parameters: None,
+                        active_parameter: None,
+                    }];
+
+                    return Ok(Some(SignatureHelp {
+                        signatures,
+                        active_signature: Some(0),
+                        active_parameter: None,
+                    }));
+                }
+                Ok(None) => {
+                    // No definition found
+                    let signatures = vec![SignatureInformation {
+                        label: format!("No definition found for '{}'", word),
+                        documentation: None,
+                        parameters: None,
+                        active_parameter: None,
+                    }];
+
+                    return Ok(Some(SignatureHelp {
+                        signatures,
+                        active_signature: Some(0),
+                        active_parameter: None,
+                    }));
+                }
+                Err(_) => return Ok(None),
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Converts a dictionary response into LSP SignatureInformation format
+    /// Each part of speech becomes a separate signature with its definitions as parameters
+    fn create_signatures_from_dictionary(
+        &self,
+        response: &DictionaryResponse,
+    ) -> Vec<SignatureInformation> {
+        let mut signatures = Vec::new();
+
+        for meaning in &response.meanings {
+            // Create parameter information for each definition
+            let parameters: Vec<ParameterInformation> = meaning
+                .definitions
+                .iter()
+                .map(|def| ParameterInformation {
+                    label: tower_lsp::lsp_types::ParameterLabel::Simple(def.definition.clone()),
+                    documentation: def.example.clone().map(|ex| {
+                        Documentation::MarkupContent(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: format!("*Example:* {}", ex),
+                        })
+                    }),
+                })
+                .collect();
+
+            // Create a signature for this part of speech
+            signatures.push(SignatureInformation {
+                label: format!("{}:", meaning.part_of_speech),
+                documentation: Some(Documentation::MarkupContent(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: format!("**{}** _{}_", response.word, meaning.part_of_speech),
+                })),
+                parameters: Some(parameters),
+                active_parameter: None,
+            });
+        }
+
+        signatures
     }
 }
 
