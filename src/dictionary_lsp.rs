@@ -219,7 +219,7 @@ impl DictionaryLsp {
             match self.get_meaning(&word).await {
                 Ok(Some(response)) => {
                     // Format the response as Markdown
-                    let mut markdown = format!("**{}**\n\n", word);
+                    let mut markdown = format!("**{}**\n", word);
 
                     for meaning in &response.meanings {
                         markdown.push_str(&format!("_{}_\n", meaning.part_of_speech));
