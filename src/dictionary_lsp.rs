@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
-// use stardict::{StarDict, StarDictResult};
 use std::collections::HashMap;
-// use std::path::Path;
 use tokio;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
@@ -19,16 +17,11 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 // FIX: function for checking if a character is a CJK character to avoid UTF-8 boundary issues
 fn is_cjk_char(c: char) -> bool {
-    // CJK Unified Ideographs range
-    (c >= '\u{4E00}' && c <= '\u{9FFF}') ||
-    // CJK Unified Ideographs Extension A
-    (c >= '\u{3400}' && c <= '\u{4DBF}') ||
-    // CJK Unified Ideographs Extension B
-    (c >= '\u{20000}' && c <= '\u{2A6DF}') ||
-    // CJK Unified Ideographs Extension C
-    (c >= '\u{2A700}' && c <= '\u{2B73F}') ||
-    // CJK Unified Ideographs Extension D
-    (c >= '\u{2B740}' && c <= '\u{2B81F}')
+    (c >= '\u{4E00}' && c <= '\u{9FFF}')
+        || (c >= '\u{3400}' && c <= '\u{4DBF}')
+        || (c >= '\u{20000}' && c <= '\u{2A6DF}')
+        || (c >= '\u{2A700}' && c <= '\u{2B73F}')
+        || (c >= '\u{2B740}' && c <= '\u{2B81F}')
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -112,13 +105,9 @@ impl LanguageServer for DictionaryLsp {
 
 impl DictionaryLsp {
     async fn analyze_document(&self, uri: Url, content: String) {
-        // Parse the document content
         let words = self.parse_document(&content);
-
-        // Example: Send diagnostic for unknown words
         let diagnostics = self.check_words(words).await;
 
-        // Send diagnostics to client
         self.client
             .publish_diagnostics(uri, diagnostics, None)
             .await;
@@ -137,30 +126,81 @@ impl DictionaryLsp {
     }
 
     async fn check_words(&self, _words: Vec<String>) -> Vec<Diagnostic> {
-        // Implement your dictionary checking logic here
-        Vec::new() // Placeholder for now
+        //TODO: Implement dictionary checking here
+        Vec::new()
     }
 
     async fn on_hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let position = params.text_document_position_params.position;
         let document_uri = params.text_document_position_params.text_document.uri;
 
-        if let Ok(content) = std::fs::read_to_string(document_uri.path()) {
-            // Extract the word at position
-            if let Some(word) = self.get_word_at_position(&content, position) {
-                // TODO: add proper dictionary lookup here to get the word meaning and return to the client
-                let contents = HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: format!("**{}**: man", word),
-                });
+        // Get document content, either from memory or file system
+        let content = match self.document_map.lock().await.get(&document_uri) {
+            Some(content) => content.clone(),
+            None => {
+                // If not in memory, try to read from file system
+                match std::fs::read_to_string(document_uri.path()) {
+                    Ok(content) => content,
+                    Err(_) => return Ok(None), // Document not available
+                }
+            }
+        };
 
-                return Ok(Some(Hover {
-                    contents,
-                    range: None,
-                }));
+        // Extract the word at position
+        if let Some(word) = self.get_word_at_position(&content, position) {
+            match self.get_meaning(&word).await {
+                Ok(Some(response)) => {
+                    // Format the response as nice Markdown
+                    let mut markdown = format!("**{}**\n\n", word);
+
+                    for meaning in &response.meanings {
+                        markdown.push_str(&format!("_{}_\n\n", meaning.part_of_speech));
+
+                        for (i, definition) in meaning.definitions.iter().enumerate() {
+                            markdown.push_str(&format!("{}. {}\n", i + 1, definition.definition));
+
+                            if let Some(example) = &definition.example {
+                                markdown.push_str(&format!("   > Example: _{}_\n", example));
+                            }
+                        }
+                        markdown.push_str("\n");
+                    }
+
+                    let contents = HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: markdown,
+                    });
+                    return Ok(Some(Hover {
+                        contents,
+                        range: None,
+                    }));
+                }
+                Ok(None) => {
+                    // No definition found
+                    let contents = HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: format!("No definition found for **{}**", word),
+                    });
+                    return Ok(Some(Hover {
+                        contents,
+                        range: None,
+                    }));
+                }
+                Err(_) => {
+                    // Error occurred while fetching definition
+                    let contents = HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: format!("Error looking up definition for **{}**", word),
+                    });
+                    return Ok(Some(Hover {
+                        contents,
+                        range: None,
+                    }));
+                }
             }
         }
 
+        // If we get here, no word was found at the cursor position
         Ok(None)
     }
 
@@ -189,6 +229,69 @@ impl DictionaryLsp {
             None
         } else {
             Some(chars[start..end].iter().collect())
+        }
+    }
+
+    async fn get_meaning(&self, word: &str) -> Result<Option<DictionaryResponse>> {
+        // Path to your JSON dictionary file
+        let dict_path = std::path::PathBuf::from("/Users/pxwg-dogggie/dicts/dictionary.json");
+
+        // Check if dictionary file exists
+        if !dict_path.exists() {
+            eprintln!("Dictionary file not found at {:?}", dict_path);
+            return Ok(None);
+        }
+
+        // Read the dictionary file
+        match std::fs::read_to_string(&dict_path) {
+            Ok(contents) => {
+                // Parse JSON dictionary
+                let dictionary: serde_json::Value = match serde_json::from_str(&contents) {
+                    Ok(dict) => dict,
+                    Err(e) => {
+                        eprintln!("Error parsing dictionary JSON: {}", e);
+                        return Ok(None);
+                    }
+                };
+
+                // Look up the word (case-insensitive)
+                let word_lower = word.to_lowercase();
+
+                if let Some(entry) = dictionary.get(&word_lower) {
+                    let mut meanings = Vec::new();
+
+                    // Process definitions by part of speech
+                    if let Some(obj) = entry.as_object() {
+                        for (part_of_speech, defs) in obj {
+                            if let Some(defs_array) = defs.as_array() {
+                                let definitions = defs_array
+                                    .iter()
+                                    .map(|def| Definition {
+                                        definition: def.as_str().unwrap_or("").to_string(),
+                                        example: None,
+                                    })
+                                    .collect();
+
+                                meanings.push(Meaning {
+                                    part_of_speech: part_of_speech.clone(),
+                                    definitions,
+                                });
+                            }
+                        }
+                    }
+
+                    return Ok(Some(DictionaryResponse {
+                        word: word.to_string(),
+                        meanings,
+                    }));
+                }
+
+                Ok(None) // Word not found
+            }
+            Err(e) => {
+                eprintln!("Error reading dictionary file: {}", e);
+                Ok(None)
+            }
         }
     }
 }
