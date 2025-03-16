@@ -5,10 +5,14 @@
 ## 介绍
 
 <div align="center">
-  <img src="./fig/showcase.png" alt="示意图">
+  <img src="./fig/showcase_hover.png" alt="textDocument/hover 示意图">
 </div>
 
-Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查询系统，可以使用`textDocument/hover`帮助你在 neovim 中快速查询单词释义。这是一个随作者成长会不断更新的项目，之后也许会基于 LSP 的特性更新更多的功能😆
+<div align="center">
+  <img src="./fig/showcase_sig.png" alt="textDocument/signatureHelp 示意图">
+</div>
+
+Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查询系统，可以使用`textDocument/hover` 和 `textDocument/signatureHelp`帮助你在 neovim 等支持 LSP 协议的编辑器中快速查询单词释义。这是一个随作者成长会不断更新的项目，之后也许会基于 LSP 的特性更新更多的功能😆
 
 ## 安装、使用与配置
 
@@ -55,7 +59,7 @@ add_spacing = true
       -- Then set it up
       lspconfig.dictionary.setup({})
 ```  
-放在你的 `init.lua` 中即可使用。
+放在你的 `init.lua` 中即可使用。其他的编辑器请参考对应的 LSP 插件的配置方法。
 
 ## TODO
 
@@ -63,8 +67,8 @@ add_spacing = true
 
 - [x] 基本的单词查询功能
 - [x] 自定义 textDocument/hover 请求的返回文本格式⭐
-- [ ] 支持 textDocument/signatureHelp 请求⭐
-- [ ] 模糊查找⭐
+- [x] 支持 textDocument/signatureHelp 请求⭐(初步支持)
+- [ ] 模糊查找 + 自动补全⭐
 - [x] 配置文件指定字典位置
 - [ ] 支持 SQLite 数据库
 - [ ] 支持 csv 等格式的字典转换
@@ -74,6 +78,6 @@ add_spacing = true
 
 作为一个英语词汇量完全不够支撑个人英语阅读需求的英语苦手，一直以来我都很希望能够实现在 neovim 记录英语笔记时可以实现单词的快速查询。这样一方面可以帮助我在写作笔记的时候快速了解英文释义 (例如，在英语课上同步记录笔记，或者进行文献阅读时，我可以将收听到的单词直接拿去搜索)，另一方面可以在阅读文档时 (多数都是 md 格式，一般采用 neovim 阅读) 减少词汇障碍。
 
-在用 neovim 写代码的时候，LSP 自带的 `textDocument/hover` 请求可以帮助我快速调用 LSP 实现函数 / 变量名的查询 (在 neovim 中使用`K`命令调用)，这启发我使用 LSP 实现字典功能，用统一的方法像查询变量名一样去查询单词的定义。
+在用 neovim 写代码的时候，LSP 自带的 `textDocument/hover` 请求可以帮助我快速调用 LSP 实现函数 / 变量名的查询 (在 neovim 中默认使用 `K` 命令调用)，这启发我使用 LSP 实现字典功能，用统一的方法像查询变量名一样去查询单词的定义。而在 neovim 的 insert 模式下，则可以用 `textDocument/signatureHelp` 功能实现对变量名的查询 (在 neovim 中默认使用 `<C-A>` 调用)，这同样也可以帮助我在写作的过程中实现单词定义的查询。这两个功能很好地模拟了我们对单词的查询心智模式，并很容易嵌入到兼容 LSP 编辑器的工作流中。
 
 这个功能整体比较容易实现，因此尝试使用 rust 编写来熟悉一下 rust 的开发流程。
