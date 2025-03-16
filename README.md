@@ -50,6 +50,7 @@ Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查�
 这是我想做的一些事，特别想做的会标上⭐。如果你有什么想法或者建议，欢迎提 issue 或者 pr。
 
 - [x] 基本的单词查询功能
+- [ ] 自定义 textDocument/hover 请求的返回文本格式⭐
 - [ ] 支持 textDocument/signatureHelp 请求⭐
 - [ ] 模糊查找⭐
 - [ ] 配置文件指定字典位置
