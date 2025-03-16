@@ -23,8 +23,9 @@ Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查�
   ``` 
 的结构即可。将这个文件放置在 `$HOME/dicts/dictionary.json` 中即可完成配置。(这是目前的处理方式，之后会采用配置文件指定字典位置，实现对 csv 等格式的字典转换等功能，并且会在之后支持 SQLite 数据库，这样查询速度更快，现在本人的词库有 160 万 + 行 JSON，解析的时间大约半秒)
 
-如果你想要配置预览样式，可以参考 (这些不一定是默认配置)
+如果你想要配置预览样式、字典路径等内容，可以参考 (这些不一定是默认配置)
 ```toml
+dictionary_path = "/path/to/your/dictionary.json"
 [formatting]
 word_format = "**{word}**"
 part_of_speech_format = "*{part}*"
@@ -61,10 +62,10 @@ add_spacing = true
 这是我想做的一些事，特别想做的会标上⭐。如果你有什么想法或者建议，欢迎提 issue 或者 pr。
 
 - [x] 基本的单词查询功能
-- [ ] 自定义 textDocument/hover 请求的返回文本格式⭐
+- [x] 自定义 textDocument/hover 请求的返回文本格式⭐
 - [ ] 支持 textDocument/signatureHelp 请求⭐
 - [ ] 模糊查找⭐
-- [ ] 配置文件指定字典位置
+- [x] 配置文件指定字典位置
 - [ ] 支持 SQLite 数据库
 - [ ] 支持 csv 等格式的字典转换
 - [ ] 实现 neovim 的兼容层，实现在文件编辑时主动添加生词、统计查询频率并调用等功能 (强烈依赖于 SQLite 的实现)⭐
