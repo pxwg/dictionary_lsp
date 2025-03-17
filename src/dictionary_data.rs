@@ -62,6 +62,7 @@ impl DictionaryLoader {
     }
 
     /// Determines the path to the dictionary file based on configuration or defaults.
+    /// TODO: Add support for SQLite etc.
     fn get_dictionary_path(&self) -> Result<PathBuf> {
         let dict_path = if let Some(path) = &self.dictionary_path {
             PathBuf::from(path)
@@ -84,6 +85,7 @@ impl DictionaryLoader {
     }
 
     /// Reads and parses the dictionary file into a JSON value.
+    /// TODO: Add support for SQLite etc.
     fn read_dictionary_file(&self, dict_path: &Path) -> Result<serde_json::Value> {
         match std::fs::read_to_string(dict_path) {
             Ok(contents) => match serde_json::from_str(&contents) {
@@ -112,6 +114,7 @@ impl DictionaryLoader {
     }
 
     /// Attempts to find a close match using fuzzy matching.
+    /// TODO: faster fuzzy match based on SIMD and Smith-Waterman algorithm
     fn find_fuzzy_match(
         &self,
         dictionary: &serde_json::Value,

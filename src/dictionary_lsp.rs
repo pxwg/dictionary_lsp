@@ -1,23 +1,20 @@
 use crate::config::Config;
-use crate::dictionary_data::{DictionaryLoader, DictionaryResponse};
 use crate::hover::HoverHandler;
 use crate::signature_help::SignatureHelpHandler;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::lsp_types::{
-    Documentation, Hover, HoverContents, HoverParams, MarkupContent, MarkupKind, Position,
-    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation,
+    Hover, HoverParams, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
 };
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-struct DictionaryLsp {
+pub struct DictionaryLsp {
     client: Client,
     document_map: Mutex<HashMap<Url, String>>,
-    config: Config,
+    pub config: Config,
     hover_handler: HoverHandler,
     signature_help_handler: SignatureHelpHandler,
 }
@@ -80,8 +77,7 @@ impl LanguageServer for DictionaryLsp {
         Ok(())
     }
 
-    /// Processes hover requests by looking up dictionary definitions for
-    /// the word under the cursor.
+    /// Processes hover requests by looking up dictionary definitions for the word under the cursor.
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         self.hover_handler.on_hover(params).await
     }
