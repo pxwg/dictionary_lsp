@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::dictionary_data::{DictionaryLoader, DictionaryResponse};
+use crate::dictionary_data::DictionaryLoader;
 use crate::formatting;
 use std::collections::HashMap;
 use tokio::sync::Mutex;
