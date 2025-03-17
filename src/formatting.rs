@@ -1,4 +1,4 @@
-use crate::dictionary_lsp::DictionaryResponse;
+use crate::dictionary_data::DictionaryResponse;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for markdown formatting styles
