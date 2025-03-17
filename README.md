@@ -69,7 +69,7 @@ add_spacing = true
 - [x] 基本的单词查询功能
 - [x] 自定义 textDocument/hover 请求的返回文本格式⭐
 - [x] 支持 textDocument/signatureHelp 请求⭐(初步支持)
-- [ ] 模糊查找 + 自动补全⭐
+- [ ] 模糊查找 (初步完成，之后会基于更为流行的模糊匹配库，但这同样依赖于 SQLite 的实现) + 自动补全⭐
 - [ ] 添加单元测试⭐
 - [x] 配置文件指定字典位置
 - [ ] 支持 SQLite 数据库⭐
