@@ -6,5 +6,5 @@ pub mod hover;
 pub mod signature_help;
 
 fn main() {
-    dictionary_lsp::run_server();
+  dictionary_lsp::run_server();
 }
