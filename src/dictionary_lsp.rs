@@ -7,9 +7,8 @@ use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::lsp_types::{
-    Documentation, Hover, HoverContents, HoverParams, MarkupContent, MarkupKind,
-    ParameterInformation, Position, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    SignatureInformation,
+    Documentation, Hover, HoverContents, HoverParams, MarkupContent, MarkupKind, Position,
+    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation,
 };
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
@@ -154,7 +153,26 @@ impl DictionaryLsp {
     /// Retrieves the dictionary definition for a given word.
     /// Reads from a local JSON dictionary file and parses the entries.
     async fn get_meaning(&self, word: &str) -> Result<Option<DictionaryResponse>> {
-        //TODO: Use a static or cached dictionary path instead of hardcoding
+        let dict_path = self.get_dictionary_path()?;
+        let dictionary = self.read_dictionary_file(&dict_path)?;
+
+        let word_lower = word.to_lowercase();
+
+        // Try exact match first
+        if let Some(response) = self.find_exact_match(&dictionary, &word_lower) {
+            return Ok(Some(response));
+        }
+
+        // Fall back to fuzzy matching
+        if let Some(response) = self.find_fuzzy_match(&dictionary, &word_lower) {
+            return Ok(Some(response));
+        }
+
+        Ok(None)
+    }
+
+    /// Determines the path to the dictionary file based on configuration or defaults.
+    fn get_dictionary_path(&self) -> Result<std::path::PathBuf> {
         let dict_path = if let Some(path) = &self.config.dictionary_path {
             std::path::PathBuf::from(path)
         } else {
@@ -162,62 +180,146 @@ impl DictionaryLsp {
                 Some(path) => path,
                 None => {
                     eprintln!("Could not determine home directory");
-                    return Ok(None);
+                    return Err(tower_lsp::jsonrpc::Error::internal_error());
                 }
             }
         };
 
         if !dict_path.exists() {
             eprintln!("Dictionary file not found at {:?}", dict_path);
-            return Ok(None);
+            return Err(tower_lsp::jsonrpc::Error::internal_error());
         }
 
-        match std::fs::read_to_string(&dict_path) {
-            Ok(contents) => {
-                let dictionary: serde_json::Value = match serde_json::from_str(&contents) {
-                    Ok(dict) => dict,
-                    Err(e) => {
-                        eprintln!("Error parsing dictionary JSON: {}", e);
-                        return Ok(None);
-                    }
-                };
+        Ok(dict_path)
+    }
 
-                let word_lower = word.to_lowercase();
-
-                if let Some(entry) = dictionary.get(&word_lower) {
-                    let mut meanings = Vec::new();
-
-                    if let Some(obj) = entry.as_object() {
-                        for (part_of_speech, defs) in obj {
-                            if let Some(defs_array) = defs.as_array() {
-                                let definitions = defs_array
-                                    .iter()
-                                    .map(|def| Definition {
-                                        definition: def.as_str().unwrap_or("").to_string(),
-                                        example: None,
-                                    })
-                                    .collect();
-
-                                meanings.push(Meaning {
-                                    part_of_speech: part_of_speech.clone(),
-                                    definitions,
-                                });
-                            }
-                        }
-                    }
-
-                    return Ok(Some(DictionaryResponse {
-                        word: word.to_string(),
-                        meanings,
-                    }));
+    /// Reads and parses the dictionary file into a JSON value.
+    fn read_dictionary_file(&self, dict_path: &std::path::Path) -> Result<serde_json::Value> {
+        match std::fs::read_to_string(dict_path) {
+            Ok(contents) => match serde_json::from_str(&contents) {
+                Ok(dict) => Ok(dict),
+                Err(e) => {
+                    eprintln!("Error parsing dictionary JSON: {}", e);
+                    Err(tower_lsp::jsonrpc::Error::internal_error())
                 }
-
-                Ok(None)
-            }
+            },
             Err(e) => {
                 eprintln!("Error reading dictionary file: {}", e);
-                Ok(None)
+                Err(tower_lsp::jsonrpc::Error::internal_error())
             }
+        }
+    }
+
+    /// Finds an exact match for the word in the dictionary.
+    fn find_exact_match(
+        &self,
+        dictionary: &serde_json::Value,
+        word: &str,
+    ) -> Option<DictionaryResponse> {
+        dictionary
+            .get(word)
+            .map(|entry| self.parse_dictionary_entry(word, entry, Some(word)))
+    }
+
+    /// Attempts to find a close match using fuzzy matching.
+    fn find_fuzzy_match(
+        &self,
+        dictionary: &serde_json::Value,
+        word: &str,
+    ) -> Option<DictionaryResponse> {
+        let max_distance = 2;
+        let mut closest_match = None;
+        let mut min_distance = max_distance + 1;
+
+        // Find the closest match within our threshold
+        if let Some(entries) = dictionary.as_object() {
+            for (dict_word, entry) in entries {
+                let distance = self.levenshtein_distance(word, dict_word);
+                if distance <= max_distance && distance < min_distance {
+                    min_distance = distance;
+                    closest_match = Some((dict_word.clone(), entry));
+                }
+            }
+        }
+
+        closest_match.map(|(matched_word, entry)| {
+            self.parse_dictionary_entry(&matched_word, entry, Some(word))
+        })
+    }
+
+    // Calculate Levenshtein distance between two strings
+    fn levenshtein_distance(&self, s1: &str, s2: &str) -> usize {
+        let len1 = s1.chars().count();
+        let len2 = s2.chars().count();
+        if len1 == 0 {
+            return len2;
+        }
+        if len2 == 0 {
+            return len1;
+        }
+
+        let s1_chars: Vec<char> = s1.chars().collect();
+        let s2_chars: Vec<char> = s2.chars().collect();
+
+        let mut matrix = vec![vec![0; len2 + 1]; len1 + 1];
+
+        for i in 0..=len1 {
+            matrix[i][0] = i;
+        }
+        for j in 0..=len2 {
+            matrix[0][j] = j;
+        }
+
+        // Fill the matrix
+        for i in 1..=len1 {
+            for j in 1..=len2 {
+                let cost = if s1_chars[i - 1] == s2_chars[j - 1] {
+                    0
+                } else {
+                    1
+                };
+                matrix[i][j] = std::cmp::min(
+                    std::cmp::min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1),
+                    matrix[i - 1][j - 1] + cost,
+                );
+            }
+        }
+
+        matrix[len1][len2]
+    }
+
+    // Parse dictionary entry into DictionaryResponse format
+    // TODO: return the correct word while fuzzy matching
+    fn parse_dictionary_entry(
+        &self,
+        word: &str,
+        entry: &serde_json::Value,
+        _original_query: Option<&str>,
+    ) -> DictionaryResponse {
+        let mut meanings = Vec::new();
+
+        if let Some(obj) = entry.as_object() {
+            for (part_of_speech, defs) in obj {
+                if let Some(defs_array) = defs.as_array() {
+                    let definitions = defs_array
+                        .iter()
+                        .map(|def| Definition {
+                            definition: def.as_str().unwrap_or("").to_string(),
+                            example: None,
+                        })
+                        .collect();
+
+                    meanings.push(Meaning {
+                        part_of_speech: part_of_speech.clone(),
+                        definitions,
+                    });
+                }
+            }
+        }
+
+        DictionaryResponse {
+            word: word.to_string(),
+            meanings,
         }
     }
 
@@ -243,8 +345,9 @@ impl DictionaryLsp {
             match self.get_meaning(&word).await {
                 Ok(Some(response)) => {
                     // Format the response as Markdown
+                    eprintln!("{}", &word);
                     let markdown = formatting::format_definition_as_markdown_with_config(
-                        &word,
+                        &response.word,
                         &response,
                         &self.config.formatting,
                     );
@@ -327,101 +430,78 @@ impl DictionaryLsp {
         let position = params.text_document_position_params.position;
         let document_uri = params.text_document_position_params.text_document.uri;
 
-        // Get document content from memory or file system
-        let content = match self.document_map.lock().await.get(&document_uri) {
-            Some(content) => content.clone(),
-            None => match std::fs::read_to_string(document_uri.path()) {
-                Ok(content) => content,
-                Err(_) => return Ok(None),
-            },
-        };
+        let content = self.get_document_content(&document_uri).await?;
 
         if let Some(word) = self.get_word_at_position(&content, position) {
             match self.get_meaning(&word).await {
-                Ok(Some(response)) => {
-                    // Format the entire dictionary response as hover-like content
-                    let value = formatting::format_definition_as_markdown_with_config(
-                        &word,
-                        &response,
-                        &self.config.formatting,
-                    );
-
-                    // HACK: only show the label part of signature help
-                    let signatures = vec![SignatureInformation {
-                        documentation: Some(Documentation::MarkupContent(MarkupContent {
-                            kind: MarkupKind::PlainText,
-                            value: "".to_string(),
-                        })),
-                        label: value,
-                        parameters: None,
-                        active_parameter: None,
-                    }];
-
-                    return Ok(Some(SignatureHelp {
-                        signatures,
-                        active_signature: Some(0),
-                        active_parameter: None,
-                    }));
-                }
-                Ok(None) => {
-                    // No definition found
-                    let signatures = vec![SignatureInformation {
-                        label: format!("No definition found for '{}'", word),
-                        documentation: None,
-                        parameters: None,
-                        active_parameter: None,
-                    }];
-
-                    return Ok(Some(SignatureHelp {
-                        signatures,
-                        active_signature: Some(0),
-                        active_parameter: None,
-                    }));
-                }
-                Err(_) => return Ok(None),
+                Ok(Some(response)) => Ok(Some(
+                    self.create_signature_help_for_definition(&response.word, &response),
+                )),
+                Ok(None) => Ok(Some(
+                    self.create_signature_help_for_missing_definition(&word),
+                )),
+                Err(_) => Ok(None),
             }
+        } else {
+            Ok(None)
         }
-
-        Ok(None)
     }
 
-    /// Converts a dictionary response into LSP SignatureInformation format
-    /// Each part of speech becomes a separate signature with its definitions as parameters
-    fn create_signatures_from_dictionary(
-        &self,
-        response: &DictionaryResponse,
-    ) -> Vec<SignatureInformation> {
-        let mut signatures = Vec::new();
-
-        for meaning in &response.meanings {
-            // Create parameter information for each definition
-            let parameters: Vec<ParameterInformation> = meaning
-                .definitions
-                .iter()
-                .map(|def| ParameterInformation {
-                    label: tower_lsp::lsp_types::ParameterLabel::Simple(def.definition.clone()),
-                    documentation: def.example.clone().map(|ex| {
-                        Documentation::MarkupContent(MarkupContent {
-                            kind: MarkupKind::Markdown,
-                            value: format!("*Example:* {}", ex),
-                        })
-                    }),
-                })
-                .collect();
-
-            // Create a signature for this part of speech
-            signatures.push(SignatureInformation {
-                label: format!("{}:", meaning.part_of_speech),
-                documentation: Some(Documentation::MarkupContent(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: format!("**{}** _{}_", response.word, meaning.part_of_speech),
-                })),
-                parameters: Some(parameters),
-                active_parameter: None,
-            });
+    /// Retrieves document content either from the document map or by reading from disk
+    async fn get_document_content(&self, document_uri: &Url) -> Result<String> {
+        match self.document_map.lock().await.get(document_uri) {
+            Some(content) => Ok(content.clone()),
+            None => match std::fs::read_to_string(document_uri.path()) {
+                Ok(content) => Ok(content),
+                Err(_) => Err(tower_lsp::jsonrpc::Error::internal_error()),
+            },
         }
+    }
 
-        signatures
+    /// Creates signature help object for a word with a definition
+    fn create_signature_help_for_definition(
+        &self,
+        _word: &str,
+        response: &DictionaryResponse,
+    ) -> SignatureHelp {
+        // Format the entire dictionary response as hover-like content
+        let value = formatting::format_definition_as_markdown_with_config(
+            &response.word,
+            response,
+            &self.config.formatting,
+        );
+
+        let signatures = vec![SignatureInformation {
+            documentation: Some(Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::PlainText,
+                value: "".to_string(),
+            })),
+            label: value,
+            parameters: None,
+            active_parameter: None,
+        }];
+
+        SignatureHelp {
+            signatures,
+            active_signature: Some(0),
+            active_parameter: None,
+        }
+    }
+
+    /// Creates signature help object for a word without a definition
+    fn create_signature_help_for_missing_definition(&self, word: &str) -> SignatureHelp {
+        let signatures = vec![SignatureInformation {
+            label: format!("No definition found for '{}'", word),
+            documentation: None,
+            parameters: None,
+            active_parameter: None,
+        }];
+
+        SignatureHelp {
+            signatures,
+            active_signature: Some(0),
+            active_parameter: None,
+        }
     }
 }
 
