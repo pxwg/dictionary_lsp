@@ -2,25 +2,26 @@ use crate::config::Config;
 use crate::dictionary_data::{create_dictionary_provider, DictionaryProvider};
 use crate::formatting;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{Hover, HoverContents, HoverParams, MarkupContent, MarkupKind, Url};
 
 pub struct HoverHandler {
-  document_map: Mutex<HashMap<Url, String>>,
+  document_map: Arc<Mutex<HashMap<Url, String>>>,
   dictionary_provider: Box<dyn DictionaryProvider>,
   config: Config,
 }
 
 impl HoverHandler {
   pub fn new(
-    document_map: Mutex<HashMap<Url, String>>,
-    dictionary_path: Option<String>,
+    document_map: Arc<Mutex<HashMap<Url, String>>>,
+    dictionary_path: String,
     config: Config,
   ) -> Self {
     Self {
       document_map,
-      dictionary_provider: create_dictionary_provider(dictionary_path),
+      dictionary_provider: create_dictionary_provider(Some(dictionary_path)),
       config,
     }
   }
@@ -31,7 +32,7 @@ impl HoverHandler {
     let position = params.text_document_position_params.position;
     let document_uri = params.text_document_position_params.text_document.uri;
 
-    // Get document content from memory or file system
+    // BUG: Cannot find the document content from `match self.document_map.lock().await.get(&document_uri)`, thus the hover feature could not work for get hover help for the changed (but not saved) document content.
     let content = match self.document_map.lock().await.get(&document_uri) {
       Some(content) => content.clone(),
       None => match std::fs::read_to_string(document_uri.path()) {

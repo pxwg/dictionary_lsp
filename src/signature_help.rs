@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::dictionary_data::{create_dictionary_provider, DictionaryProvider};
 use crate::formatting;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::lsp_types::{
@@ -10,14 +11,14 @@ use tower_lsp::lsp_types::{
 };
 
 pub struct SignatureHelpHandler {
-  document_map: Mutex<HashMap<Url, String>>,
+  document_map: Arc<Mutex<HashMap<Url, String>>>,
   dictionary_loader: Box<dyn DictionaryProvider>,
   config: Config,
 }
 
 impl SignatureHelpHandler {
   pub fn new(
-    document_map: Mutex<HashMap<Url, String>>,
+    document_map: Arc<Mutex<HashMap<Url, String>>>,
     dictionary_path: Option<String>,
     config: Config,
   ) -> Self {

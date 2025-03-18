@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::hover::HoverHandler;
 use crate::signature_help::SignatureHelpHandler;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
@@ -13,7 +14,7 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 pub struct DictionaryLsp {
   client: Client,
-  document_map: Mutex<HashMap<Url, String>>,
+  document_map: Arc<Mutex<HashMap<Url, String>>>,
   pub config: Config,
   hover_handler: HoverHandler,
   signature_help_handler: SignatureHelpHandler,
@@ -55,21 +56,24 @@ impl LanguageServer for DictionaryLsp {
     self.analyze_document(uri, content).await;
   }
 
-  /// Handles document content changes by updating the stored document
-  /// and re-analyzing it.
+  /// Handles document content changes by updating the stored document and re-analyzing it.
   async fn did_change(&self, params: DidChangeTextDocumentParams) {
     let uri = params.text_document.uri;
-    if let Some(change) = params.content_changes.get(0) {
-      let content = change.text.clone();
-
-      self
-        .document_map
-        .lock()
-        .await
-        .insert(uri.clone(), content.clone());
-
-      self.analyze_document(uri, content).await;
+    if let Some(content) = self.document_map.lock().await.get_mut(&uri) {
+      for change in params.content_changes {
+        if change.range.is_none() {
+          *content = change.text;
+        }
+      }
     }
+  }
+
+  async fn did_close(&self, params: DidCloseTextDocumentParams) {
+    self
+      .document_map
+      .lock()
+      .await
+      .remove(&params.text_document.uri);
   }
 
   /// Handles the shutdown request from the client.
@@ -127,24 +131,26 @@ pub async fn run_server() {
   let stdout = tokio::io::stdout();
 
   let config = Config::get();
-  let _document_map = Mutex::new(HashMap::<Url, String>::new());
+
+  // Create a shared document map wrapped in an Arc
+  let document_map = Arc::new(Mutex::new(HashMap::<Url, String>::new()));
 
   let (service, socket) = LspService::new(|client| {
     let hover_handler = HoverHandler::new(
-      Mutex::new(HashMap::new()),
-      config.dictionary_path.clone(),
+      document_map.clone(),
+      config.dictionary_path.clone().expect(""),
       config.clone(),
     );
 
     let signature_help_handler = SignatureHelpHandler::new(
-      Mutex::new(HashMap::new()),
+      document_map.clone(),
       config.dictionary_path.clone(),
       config.clone(),
     );
 
     DictionaryLsp {
       client,
-      document_map: Mutex::new(HashMap::new()),
+      document_map,
       config: config.clone(),
       hover_handler,
       signature_help_handler,
