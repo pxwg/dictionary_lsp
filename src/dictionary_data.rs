@@ -129,7 +129,7 @@ impl SqliteDictionaryProvider {
               return Ok(Some(DictionaryResponse {
                 word,
                 meanings: vec![Meaning {
-                  part_of_speech: pos.unwrap_or_else(|| "man".to_string()),
+                  part_of_speech: pos.unwrap_or_else(|| "unknown".to_string()),
                   definitions,
                 }],
               }));
@@ -255,7 +255,7 @@ impl SqliteDictionaryProvider {
     DictionaryResponse {
       word: word.to_string(),
       meanings: vec![Meaning {
-        part_of_speech: pos.unwrap_or_else(|| "man".to_string()),
+        part_of_speech: pos.unwrap_or_else(|| "unknown".to_string()),
         definitions,
       }],
     }
