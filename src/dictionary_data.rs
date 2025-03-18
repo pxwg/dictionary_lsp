@@ -1,6 +1,13 @@
+use std::vec;
+
+use crate::config::Config;
+use async_trait::async_trait;
+use rusqlite;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-use tower_lsp::jsonrpc::{Error, Result};
+use serde_json;
+use tower_lsp::jsonrpc::Error;
+use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::Position;
 
 /// Determines if the character is a CJK (Chinese, Japanese, Korean) character
 /// by checking if it falls within the Unicode ranges for CJK characters.
@@ -13,80 +20,338 @@ pub fn is_cjk_char(c: char) -> bool {
         || (c >= '\u{2B740}' && c <= '\u{2B81F}') // CJK Unified Ideographs Extension D
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DictionaryResponse {
   pub word: String,
   pub meanings: Vec<Meaning>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Meaning {
   pub part_of_speech: String,
   pub definitions: Vec<Definition>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Definition {
   pub definition: String,
   pub example: Option<String>,
 }
 
-pub struct DictionaryLoader {
+/// Common trait for dictionary data providers
+#[async_trait]
+pub trait DictionaryProvider: Send + Sync {
+  async fn get_meaning(&self, word: &str) -> Result<Option<DictionaryResponse>>;
+  fn get_word_at_position(&self, content: &str, position: Position) -> Option<String>;
+}
+
+/// Factory function to create the appropriate dictionary provider
+pub fn create_dictionary_provider(dictionary_path: Option<String>) -> Box<dyn DictionaryProvider> {
+  if Config::is_sqlite(dictionary_path.as_deref()) {
+    Box::new(SqliteDictionaryProvider::new(dictionary_path))
+  } else {
+    Box::new(JsonDictionaryProvider::new(dictionary_path))
+  }
+}
+
+/// Provider implementation for SQLite dictionaries
+pub struct SqliteDictionaryProvider {
   dictionary_path: Option<String>,
 }
 
-impl DictionaryLoader {
+impl SqliteDictionaryProvider {
+  pub fn new(dictionary_path: Option<String>) -> Self {
+    Self { dictionary_path }
+  }
+  fn get_dictionary_path(&self) -> Result<String> {
+    match &self.dictionary_path {
+      Some(path) => Ok(path.clone()),
+      None => Err(Error::invalid_params("Dictionary path not provided")),
+    }
+  }
+  fn get_safe_string(row: &rusqlite::Row, idx: usize) -> Option<String> {
+    match row.get::<_, Option<String>>(idx) {
+      Ok(Some(s)) => Some(s),
+      _ => match row.get::<_, Option<Vec<u8>>>(idx) {
+        Ok(Some(bytes)) => Some(String::from_utf8_lossy(&bytes).into_owned()),
+        _ => None,
+      },
+    }
+  }
+
+  fn find_exact_match(
+    &self,
+    conn: &rusqlite::Connection,
+    word: &str,
+  ) -> Result<Option<DictionaryResponse>> {
+    let mut stmt = conn
+      .prepare(
+        r#"
+        SELECT 
+            w.word,
+            p.name AS pos,
+            d.definition
+        FROM words w
+        JOIN definitions d ON w.id = d.word_id
+        JOIN parts_of_speech p ON d.pos_id = p.id
+        WHERE w.word = ?1 COLLATE NOCASE
+        ORDER BY p.name
+        "#,
+      )
+      .map_err(|e| {
+        eprintln!("Error preparing statement: {}", e);
+        Error::internal_error()
+      })?;
+
+    let query_result = stmt.query_map([word], |row| {
+      let word = Self::get_safe_string(row, 0).unwrap_or_default();
+      let pos = Self::get_safe_string(row, 1);
+      let translation = Self::get_safe_string(row, 2);
+
+      Ok((word, translation, pos))
+    });
+
+    match query_result {
+      Ok(mut rows) => {
+        if let Some(row_result) = rows.next() {
+          match row_result {
+            Ok((word, translation, pos)) => {
+              let mut definitions = Vec::new();
+              if let Some(trans) = translation {
+                definitions.push(Definition {
+                  definition: trans,
+                  example: None,
+                });
+              }
+              if definitions.is_empty() {
+                return Ok(None);
+              }
+              return Ok(Some(DictionaryResponse {
+                word,
+                meanings: vec![Meaning {
+                  part_of_speech: pos.unwrap_or_else(|| "man".to_string()),
+                  definitions,
+                }],
+              }));
+            }
+            Err(e) => {
+              eprintln!("Error processing row: {}", e);
+              return Err(Error::internal_error());
+            }
+          }
+        }
+        Ok(None)
+      }
+      Err(e) => {
+        eprintln!("Error querying database: {}", e);
+        Err(Error::internal_error())
+      }
+    }
+  }
+
+  fn find_fuzzy_match(
+    &self,
+    conn: &rusqlite::Connection,
+    word: &str,
+  ) -> Result<Option<DictionaryResponse>> {
+    let word_len = word.len() as i64;
+    let max_distance = 2;
+    let mut stmt = match conn.prepare(
+      r#"
+        SELECT 
+            w.word,
+            p.name AS pos,
+            d.definition
+        FROM words w
+        JOIN definitions d ON w.id = d.word_id
+        JOIN parts_of_speech p ON d.pos_id = p.id
+        WHERE length(w.word) BETWEEN ?1 - ?2 AND ?1 + ?2
+          AND substr(w.word, 1, 1) = substr(?3, 1, 1)
+          AND substr(w.word, -1, 1) = substr(?3, -1, 1)
+        ORDER BY length(w.word)
+        "#,
+    ) {
+      Ok(stmt) => stmt,
+      Err(e) => {
+        eprintln!("Error preparing statement: {}", e);
+        return Err(Error::internal_error());
+      }
+    };
+
+    let query_result = stmt.query_map(rusqlite::params![word_len, max_distance, word], |row| {
+      let word = Self::get_safe_string(row, 0).unwrap_or_default();
+      let pos = Self::get_safe_string(row, 1);
+      let translation = Self::get_safe_string(row, 2);
+      let detail = Self::get_safe_string(row, 3);
+
+      Ok((word, translation, pos, detail))
+    });
+
+    let max_distance = 2;
+    let mut closest_match = None;
+    let mut min_distance = max_distance + 1;
+
+    match query_result {
+      Ok(rows) => {
+        for row_result in rows {
+          match row_result {
+            Ok((dict_word, translation, pos, detail)) => {
+              let distance = self.levenshtein_distance(word, &dict_word);
+              if distance <= max_distance && distance < min_distance {
+                min_distance = distance;
+                closest_match = Some((dict_word, translation, pos, detail));
+              }
+            }
+            Err(e) => {
+              eprintln!("Error processing row: {}", e);
+              return Err(Error::internal_error());
+            }
+          }
+        }
+
+        if let Some((word, translation, pos, detail)) = closest_match {
+          return Ok(Some(self.parse_dictionary_entry(
+            &word,
+            translation,
+            pos,
+            detail,
+          )));
+        }
+
+        Ok(None)
+      }
+      Err(e) => {
+        eprintln!("Error querying database: {}", e);
+        Err(Error::internal_error())
+      }
+    }
+  }
+
+  fn parse_dictionary_entry(
+    &self,
+    word: &str,
+    translation: Option<String>,
+    pos: Option<String>,
+    detail: Option<String>,
+  ) -> DictionaryResponse {
+    let mut definitions = Vec::new();
+
+    if let Some(trans) = translation {
+      definitions.push(Definition {
+        definition: trans,
+        example: None,
+      });
+    }
+
+    if let Some(det) = detail {
+      if !definitions.iter().any(|d| d.definition == det) {
+        definitions.push(Definition {
+          definition: det,
+          example: None,
+        });
+      }
+    }
+
+    DictionaryResponse {
+      word: word.to_string(),
+      meanings: vec![Meaning {
+        part_of_speech: pos.unwrap_or_else(|| "man".to_string()),
+        definitions,
+      }],
+    }
+  }
+  // Calculate Levenshtein distance between two strings
+  fn levenshtein_distance(&self, s1: &str, s2: &str) -> usize {
+    let len1 = s1.chars().count();
+    let len2 = s2.chars().count();
+    if len1 == 0 {
+      return len2;
+    }
+    if len2 == 0 {
+      return len1;
+    }
+
+    let s1_chars: Vec<char> = s1.chars().collect();
+    let s2_chars: Vec<char> = s2.chars().collect();
+
+    let mut matrix = vec![vec![0; len2 + 1]; len1 + 1];
+
+    for i in 0..=len1 {
+      matrix[i][0] = i;
+    }
+    for j in 0..=len2 {
+      matrix[0][j] = j;
+    }
+
+    // Fill the matrix
+    for i in 1..=len1 {
+      for j in 1..=len2 {
+        let cost = if s1_chars[i - 1] == s2_chars[j - 1] {
+          0
+        } else {
+          1
+        };
+        matrix[i][j] = std::cmp::min(
+          std::cmp::min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1),
+          matrix[i - 1][j - 1] + cost,
+        );
+      }
+    }
+
+    matrix[len1][len2]
+  }
+}
+
+#[async_trait]
+impl DictionaryProvider for SqliteDictionaryProvider {
+  async fn get_meaning(&self, word: &str) -> Result<Option<DictionaryResponse>> {
+    let word_lower = word;
+
+    let dict_path = &self.get_dictionary_path()?;
+
+    let conn = match rusqlite::Connection::open(&dict_path) {
+      Ok(conn) => conn,
+      Err(e) => {
+        eprintln!("Error connecting to SQLite database: {}", e);
+        return Err(Error::internal_error());
+      }
+    };
+
+    if let Some(response) = self.find_exact_match(&conn, &word_lower)? {
+      return Ok(Some(response));
+    }
+
+    if let Some(response) = self.find_fuzzy_match(&conn, &word_lower)? {
+      return Ok(Some(response));
+    }
+
+    // No matches found
+    Ok(None)
+  }
+
+  fn get_word_at_position(&self, content: &str, position: Position) -> Option<String> {
+    extract_word_at_position(content, position)
+  }
+}
+
+/// Provider implementation for JSON dictionaries
+pub struct JsonDictionaryProvider {
+  dictionary_path: Option<String>,
+}
+
+impl JsonDictionaryProvider {
   pub fn new(dictionary_path: Option<String>) -> Self {
     Self { dictionary_path }
   }
 
-  /// Retrieves the dictionary definition for a given word.
-  /// Reads from a local JSON dictionary file and parses the entries.
-  pub async fn get_meaning(&self, word: &str) -> Result<Option<DictionaryResponse>> {
-    let dict_path = self.get_dictionary_path()?;
-    let dictionary = self.read_dictionary_file(&dict_path)?;
-
-    let word_lower = word.to_lowercase();
-
-    // Try exact match first
-    if let Some(response) = self.find_exact_match(&dictionary, &word_lower) {
-      return Ok(Some(response));
+  fn get_dictionary_path(&self) -> Result<String> {
+    match &self.dictionary_path {
+      Some(path) => Ok(path.clone()),
+      None => Err(Error::invalid_params("Dictionary path not provided")),
     }
-
-    // Fall back to fuzzy matching
-    if let Some(response) = self.find_fuzzy_match(&dictionary, &word_lower) {
-      return Ok(Some(response));
-    }
-
-    Ok(None)
   }
 
-  /// Determines the path to the dictionary file based on configuration or defaults.
-  /// TODO: Add support for SQLite etc.
-  fn get_dictionary_path(&self) -> Result<PathBuf> {
-    let dict_path = if let Some(path) = &self.dictionary_path {
-      PathBuf::from(path)
-    } else {
-      match dirs::home_dir().map(|p| p.join("dicts/dictionary.json")) {
-        Some(path) => path,
-        None => {
-          eprintln!("Could not determine home directory");
-          return Err(Error::internal_error());
-        }
-      }
-    };
-
-    if !dict_path.exists() {
-      eprintln!("Dictionary file not found at {:?}", dict_path);
-      return Err(Error::internal_error());
-    }
-
-    Ok(dict_path)
-  }
-
-  /// Reads and parses the dictionary file into a JSON value.
-  /// TODO: Add support for SQLite etc.
-  fn read_dictionary_file(&self, dict_path: &Path) -> Result<serde_json::Value> {
+  fn read_dictionary_file(&self, dict_path: &str) -> Result<serde_json::Value> {
     match std::fs::read_to_string(dict_path) {
       Ok(contents) => match serde_json::from_str(&contents) {
         Ok(dict) => Ok(dict),
@@ -102,7 +367,6 @@ impl DictionaryLoader {
     }
   }
 
-  /// Finds an exact match for the word in the dictionary.
   fn find_exact_match(
     &self,
     dictionary: &serde_json::Value,
@@ -113,8 +377,39 @@ impl DictionaryLoader {
       .map(|entry| self.parse_dictionary_entry(word, entry, Some(word)))
   }
 
-  /// Attempts to find a close match using fuzzy matching.
-  /// TODO: faster fuzzy match based on SIMD and Smith-Waterman algorithm
+  fn parse_dictionary_entry(
+    &self,
+    word: &str,
+    entry: &serde_json::Value,
+    _original_query: Option<&str>,
+  ) -> DictionaryResponse {
+    let mut meanings = Vec::new();
+
+    if let Some(obj) = entry.as_object() {
+      for (part_of_speech, defs) in obj {
+        if let Some(defs_array) = defs.as_array() {
+          let definitions = defs_array
+            .iter()
+            .map(|def| Definition {
+              definition: def.as_str().unwrap_or("").to_string(),
+              example: None,
+            })
+            .collect();
+
+          meanings.push(Meaning {
+            part_of_speech: part_of_speech.clone(),
+            definitions,
+          });
+        }
+      }
+    }
+
+    DictionaryResponse {
+      word: word.to_string(),
+      meanings,
+    }
+  }
+
   fn find_fuzzy_match(
     &self,
     dictionary: &serde_json::Value,
@@ -179,76 +474,63 @@ impl DictionaryLoader {
 
     matrix[len1][len2]
   }
+}
 
-  // Parse dictionary entry into DictionaryResponse format
-  fn parse_dictionary_entry(
-    &self,
-    word: &str,
-    entry: &serde_json::Value,
-    _original_query: Option<&str>,
-  ) -> DictionaryResponse {
-    let mut meanings = Vec::new();
+#[async_trait]
+impl DictionaryProvider for JsonDictionaryProvider {
+  async fn get_meaning(&self, word: &str) -> Result<Option<DictionaryResponse>> {
+    let word_lower = word.to_lowercase();
+    let dict_path = self.get_dictionary_path()?;
+    let dictionary = self.read_dictionary_file(&dict_path)?;
 
-    if let Some(obj) = entry.as_object() {
-      for (part_of_speech, defs) in obj {
-        if let Some(defs_array) = defs.as_array() {
-          let definitions = defs_array
-            .iter()
-            .map(|def| Definition {
-              definition: def.as_str().unwrap_or("").to_string(),
-              example: None,
-            })
-            .collect();
-
-          meanings.push(Meaning {
-            part_of_speech: part_of_speech.clone(),
-            definitions,
-          });
-        }
-      }
+    if let Some(response) = self.find_exact_match(&dictionary, &word_lower) {
+      return Ok(Some(response));
     }
 
-    DictionaryResponse {
-      word: word.to_string(),
-      meanings,
+    if let Some(response) = self.find_fuzzy_match(&dictionary, &word_lower) {
+      return Ok(Some(response));
     }
+
+    Ok(None)
   }
 
-  /// Extracts the word at the given cursor position in the document.
-  /// Handles both alphabetic characters and CJK characters properly.
-  pub fn get_word_at_position(
-    &self,
-    content: &str,
-    position: tower_lsp::lsp_types::Position,
-  ) -> Option<String> {
-    let lines: Vec<&str> = content.lines().collect();
-    if position.line as usize >= lines.len() {
-      return None;
-    }
+  fn get_word_at_position(&self, content: &str, position: Position) -> Option<String> {
+    extract_word_at_position(content, position)
+  }
+}
 
-    let line = lines[position.line as usize];
-    let chars: Vec<char> = line.chars().collect();
-    let char_pos = position.character as usize;
+/// Common function to extract a word at a given position in text
+pub fn extract_word_at_position(
+  content: &str,
+  position: tower_lsp::lsp_types::Position,
+) -> Option<String> {
+  let lines: Vec<&str> = content.lines().collect();
+  if position.line as usize >= lines.len() {
+    return None;
+  }
 
-    if char_pos >= chars.len() {
-      return None;
-    }
+  let line = lines[position.line as usize];
+  let chars: Vec<char> = line.chars().collect();
+  let char_pos = position.character as usize;
 
-    let mut start = char_pos;
-    let mut end = char_pos;
+  if char_pos >= chars.len() {
+    return None;
+  }
 
-    while start > 0 && (chars[start - 1].is_alphabetic() || is_cjk_char(chars[start - 1])) {
-      start -= 1;
-    }
+  let mut start = char_pos;
+  let mut end = char_pos;
 
-    while end < chars.len() && (chars[end].is_alphabetic() || is_cjk_char(chars[end])) {
-      end += 1;
-    }
+  while start > 0 && (chars[start - 1].is_alphabetic() || is_cjk_char(chars[start - 1])) {
+    start -= 1;
+  }
 
-    if start == end {
-      None
-    } else {
-      Some(chars[start..end].iter().collect())
-    }
+  while end < chars.len() && (chars[end].is_alphabetic() || is_cjk_char(chars[end])) {
+    end += 1;
+  }
+
+  if start == end {
+    None
+  } else {
+    Some(chars[start..end].iter().collect())
   }
 }

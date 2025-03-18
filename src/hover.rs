@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::dictionary_data::DictionaryLoader;
+use crate::dictionary_data::{create_dictionary_provider, DictionaryProvider};
 use crate::formatting;
 use std::collections::HashMap;
 use tokio::sync::Mutex;
@@ -8,7 +8,7 @@ use tower_lsp::lsp_types::{Hover, HoverContents, HoverParams, MarkupContent, Mar
 
 pub struct HoverHandler {
   document_map: Mutex<HashMap<Url, String>>,
-  dictionary_loader: DictionaryLoader,
+  dictionary_provider: Box<dyn DictionaryProvider>,
   config: Config,
 }
 
@@ -20,7 +20,7 @@ impl HoverHandler {
   ) -> Self {
     Self {
       document_map,
-      dictionary_loader: DictionaryLoader::new(dictionary_path),
+      dictionary_provider: create_dictionary_provider(dictionary_path),
       config,
     }
   }
@@ -42,10 +42,10 @@ impl HoverHandler {
 
     // Extract the word at position and look up its meaning
     if let Some(word) = self
-      .dictionary_loader
+      .dictionary_provider
       .get_word_at_position(&content, position)
     {
-      match self.dictionary_loader.get_meaning(&word).await {
+      match self.dictionary_provider.get_meaning(&word).await {
         Ok(Some(response)) => {
           // Format the response as Markdown
           eprintln!("{}", &word);

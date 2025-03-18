@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::dictionary_data::{DictionaryLoader, DictionaryResponse};
+use crate::dictionary_data::{create_dictionary_provider, DictionaryProvider};
 use crate::formatting;
 use std::collections::HashMap;
 use tokio::sync::Mutex;
@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::{
 
 pub struct SignatureHelpHandler {
   document_map: Mutex<HashMap<Url, String>>,
-  dictionary_loader: DictionaryLoader,
+  dictionary_loader: Box<dyn DictionaryProvider>,
   config: Config,
 }
 
@@ -23,7 +23,7 @@ impl SignatureHelpHandler {
   ) -> Self {
     Self {
       document_map,
-      dictionary_loader: DictionaryLoader::new(dictionary_path),
+      dictionary_loader: create_dictionary_provider(dictionary_path),
       config,
     }
   }
@@ -72,7 +72,7 @@ impl SignatureHelpHandler {
   fn create_signature_help_for_definition(
     &self,
     _word: &str,
-    response: &DictionaryResponse,
+    response: &crate::dictionary_data::DictionaryResponse,
   ) -> SignatureHelp {
     // Format the entire dictionary response as hover-like content
     let value = formatting::format_definition_as_markdown_with_config(

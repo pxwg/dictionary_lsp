@@ -171,8 +171,10 @@ dependencies = [
 name = "dictionary_lsp"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "dirs",
  "reqwest",
+ "rusqlite",
  "serde",
  "serde_json",
  "stardict",

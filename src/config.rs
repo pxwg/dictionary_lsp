@@ -25,6 +25,13 @@ impl Config {
     Ok(config)
   }
 
+  pub fn is_sqlite(path: Option<&str>) -> bool {
+    match path {
+      Some(path) => path.ends_with(".db"),
+      None => false,
+    }
+  }
+
   /// Gets config from standard locations or creates default if not found
   pub fn get() -> Self {
     let possible_paths = vec![
