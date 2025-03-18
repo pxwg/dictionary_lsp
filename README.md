@@ -5,11 +5,11 @@
 ## 介绍
 
 <div align="center">
-  <img src="./fig/showcase_hover.png" alt="textDocument/hover 示意图">
+  <img src="./fig/showcase_hover.png" alt="textDocument/hover 示意图" width="80%">
 </div>
 
 <div align="center">
-  <img src="./fig/showcase_sig.png" alt="textDocument/signatureHelp 示意图">
+  <img src="./fig/showcase_sig.png" alt="textDocument/signatureHelp 示意图" width="80%">
 </div>
 
 Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查询系统，可以使用`textDocument/hover` 和 `textDocument/signatureHelp`帮助你在 neovim 等支持 LSP 协议的编辑器中快速查询单词释义。这是一个随作者成长会不断更新的项目，之后也许会基于 LSP 的特性更新更多的功能😆
@@ -25,12 +25,13 @@ Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查�
     ]
   }
   ``` 
-的结构即可。将这个文件放置在 `$HOME/dicts/dictionary.json` 中即可完成配置。(这是目前的处理方式，之后会采用配置文件指定字典位置，实现对 csv 等格式的字典转换等功能，并且会在之后支持 SQLite 数据库，这样查询速度更快，现在本人的词库有 160 万 + 行 JSON，解析的时间大约半秒)
+的结构即可。将这个文件放置在 `~/dicts/dictionary.json` 中 (这是默认的字典存储位置) 即可完成配置。由于 JSON 文件解析所需的 IO 性能较差，我们也提供了 SQLite 数据库的支持，你可以将字典转换为 SQLite 数据库，然后放置在 `~/dicts/dictionary.db` 中即可。转换方式可以参考[#1](https://github.com/pxwg/dictionary_lsp/issues/1)。
 
 如果你想要配置预览样式、字典路径等内容，可以参考 (这些不一定是默认配置)
 ```toml
 # ~/.config/dictionary_lsp/config.toml
-dictionary_path = "/path/to/your/dictionary.json"
+dictionary_path = "/path/to/your/dictionary.json" # JSON supported dictionary
+# dictionary_path = "/path/to/your/dictionary.db" # SQLite supported dictionary
 [formatting]
 word_format = "**{word}**"
 part_of_speech_format = "*{part}*"
@@ -73,7 +74,7 @@ add_spacing = true
 - [ ] 自动补全⭐
 - [ ] 添加单元测试⭐
 - [x] 配置文件指定字典位置
-- [ ] 支持 SQLite 数据库⭐
+- [x] 支持 SQLite 数据库⭐
 - [ ] 支持 csv 等格式的字典转换
 - [ ] 实现 neovim 的兼容层，实现在文件编辑时主动添加生词、统计查询频率并调用等功能 (强烈依赖于 SQLite 的实现)⭐
 
@@ -81,6 +82,6 @@ add_spacing = true
 
 作为一个英语词汇量完全不够支撑个人英语阅读需求的英语苦手，一直以来我都很希望能够实现在 neovim 记录英语笔记时可以实现单词的快速查询。这样一方面可以帮助我在写作笔记的时候快速了解英文释义 (例如，在英语课上同步记录笔记，或者进行文献阅读时，我可以将收听到的单词直接拿去搜索)，另一方面可以在阅读文档时 (多数都是 md 格式，一般采用 neovim 阅读) 减少词汇障碍。
 
-在用 neovim 写代码的时候，LSP 自带的 `textDocument/hover` 请求可以帮助我快速调用 LSP 实现函数 / 变量名的查询 (在 neovim 中默认使用 `K` 命令调用)，这启发我使用 LSP 实现字典功能，用统一的方法像查询变量名一样去查询单词的定义。而在 neovim 的 insert 模式下，则可以用 `textDocument/signatureHelp` 功能实现对变量名的查询 (在 neovim 中默认使用 `<C-A>` 调用)，这同样也可以帮助我在写作的过程中实现单词定义的查询。这两个功能很好地模拟了我们对单词的查询心智模式，并很容易嵌入到兼容 LSP 编辑器的工作流中。
+在用 neovim 写代码的时候，LSP 自带的 `textDocument/hover` 请求可以帮助我快速调用 LSP 实现函数 / 变量名的查询 (在 neovim 中默认使用 `K` 命令调用)，这启发我使用 LSP 实现字典功能，用统一的方法像查询变量名一样去查询单词的定义。而在 neovim 的 insert 模式下，则可以用 `textDocument/signatureHelp` 功能实现对变量名的查询 (在 neovim 中默认使用 `<C-S>` 调用)，这同样也可以帮助我在写作的过程中实现单词定义的查询。这两个功能很好地模拟了我们对单词的查询心智模式，并很容易嵌入到兼容 LSP 编辑器的工作流中。
 
 这个功能整体比较容易实现，因此尝试使用 rust 编写来熟悉一下 rust 的开发流程。
