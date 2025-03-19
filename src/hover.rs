@@ -32,7 +32,6 @@ impl HoverHandler {
     let position = params.text_document_position_params.position;
     let document_uri = params.text_document_position_params.text_document.uri;
 
-    // BUG: Cannot find the document content from `match self.document_map.lock().await.get(&document_uri)`, thus the hover feature could not work for get hover help for the changed (but not saved) document content.
     let content = match self.document_map.lock().await.get(&document_uri) {
       Some(content) => content.clone(),
       None => match std::fs::read_to_string(document_uri.path()) {
