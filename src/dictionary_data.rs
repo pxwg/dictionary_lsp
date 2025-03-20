@@ -43,6 +43,7 @@ pub struct Definition {
 pub trait DictionaryProvider: Send + Sync {
   async fn get_meaning(&self, word: &str) -> Result<Option<DictionaryResponse>>;
   fn get_word_at_position(&self, content: &str, position: Position) -> Option<String>;
+  async fn find_words_by_prefix(&self, prefix: &str) -> Result<Option<Vec<String>>>;
 }
 
 /// Factory function to create the appropriate dictionary provider
@@ -332,6 +333,56 @@ impl DictionaryProvider for SqliteDictionaryProvider {
   fn get_word_at_position(&self, content: &str, position: Position) -> Option<String> {
     extract_word_at_position(content, position)
   }
+
+  async fn find_words_by_prefix(&self, prefix: &str) -> Result<Option<Vec<String>>> {
+    let dict_path = &self.get_dictionary_path()?;
+
+    let conn = match rusqlite::Connection::open(&dict_path) {
+      Ok(conn) => conn,
+      Err(e) => {
+        eprintln!("Error connecting to SQLite database: {}", e);
+        return Err(Error::internal_error());
+      }
+    };
+
+    let query = "SELECT word FROM words WHERE word LIKE ?1 AND word GLOB '[A-Za-z]*' AND word NOT GLOB '*[^A-Za-z]*' LIMIT 5";
+
+    let mut stmt = match conn.prepare(query) {
+      Ok(stmt) => stmt,
+      Err(e) => {
+        eprintln!("Error preparing statement: {}", e);
+        return Err(Error::internal_error());
+      }
+    };
+
+    let param = format!("{}%", prefix);
+    let rows = stmt.query_map([param], |row| row.get::<_, String>(0));
+
+    match rows {
+      Ok(mapped_rows) => {
+        let mut words = Vec::new();
+        for word_result in mapped_rows {
+          match word_result {
+            Ok(word) => words.push(word),
+            Err(e) => {
+              eprintln!("Error retrieving word: {}", e);
+              return Err(Error::internal_error());
+            }
+          }
+        }
+
+        if words.is_empty() {
+          Ok(None)
+        } else {
+          Ok(Some(words))
+        }
+      }
+      Err(e) => {
+        eprintln!("Error executing query: {}", e);
+        Err(Error::internal_error())
+      }
+    }
+  }
 }
 
 /// Provider implementation for JSON dictionaries
@@ -496,6 +547,27 @@ impl DictionaryProvider for JsonDictionaryProvider {
 
   fn get_word_at_position(&self, content: &str, position: Position) -> Option<String> {
     extract_word_at_position(content, position)
+  }
+
+  async fn find_words_by_prefix(&self, prefix: &str) -> Result<Option<Vec<String>>> {
+    let dict_path = self.get_dictionary_path()?;
+    let dictionary = self.read_dictionary_file(&dict_path)?;
+
+    if let Some(entries) = dictionary.as_object() {
+      let prefix_lower = prefix.to_lowercase();
+      let matching_words: Vec<String> = entries
+        .keys()
+        .filter(|word| word.to_lowercase().starts_with(&prefix_lower))
+        .take(50)
+        .map(|word| word.clone())
+        .collect();
+
+      if !matching_words.is_empty() {
+        return Ok(Some(matching_words));
+      }
+    }
+
+    Ok(None)
   }
 }
 

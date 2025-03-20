@@ -13,4 +13,6 @@ stardict = "0.2.1"
 toml = "0.7"
 async-trait = "0.1.73"
 rusqlite = { version = "0.31.0", features = ["bundled"] }
+futures = "0.3.29"
+chrono = "0.4"
 dirs = "5.0"

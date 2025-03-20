@@ -1,3 +1,4 @@
+// use crate::completion::CompletionHandler;
 use crate::config::Config;
 use crate::hover::HoverHandler;
 use crate::signature_help::SignatureHelpHandler;
@@ -8,7 +9,8 @@ use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::lsp_types::{
-  Hover, HoverParams, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+  CompletionOptions, CompletionParams, CompletionResponse, Hover, HoverParams, SignatureHelp,
+  SignatureHelpOptions, SignatureHelpParams, Url,
 };
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
@@ -18,6 +20,7 @@ pub struct DictionaryLsp {
   pub config: Config,
   hover_handler: HoverHandler,
   signature_help_handler: SignatureHelpHandler,
+  // completion_handler: CompletionHandler,
 }
 
 #[tower_lsp::async_trait]
@@ -30,8 +33,34 @@ impl LanguageServer for DictionaryLsp {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         signature_help_provider: Some(SignatureHelpOptions {
-          trigger_characters: Some(vec![" ".to_string()]), // Trigger on space
-          retrigger_characters: None,
+          trigger_characters: Some(
+            vec![
+              "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q",
+              "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H",
+              "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y",
+              "Z",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+          ),
+          retrigger_characters: Some(vec![" ".to_string()]),
+          work_done_progress_options: Default::default(),
+        }),
+        completion_provider: Some(CompletionOptions {
+          resolve_provider: Some(false),
+          completion_item: Some(CompletionOptionsCompletionItem {
+            label_details_support: Some(true),
+          }),
+          // trigger_characters: Some(vec![" ".to_string()]),
+          // trigger_characters: Some(vec![" ".to_string()]),
+          trigger_characters: Some(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+              .chars()
+              .map(|c| c.to_string())
+              .collect(),
+          ),
+          all_commit_characters: None,
           work_done_progress_options: Default::default(),
         }),
         ..ServerCapabilities::default()
@@ -58,13 +87,17 @@ impl LanguageServer for DictionaryLsp {
 
   /// Handles document content changes by updating the stored document and re-analyzing it.
   async fn did_change(&self, params: DidChangeTextDocumentParams) {
-    let uri = params.text_document.uri;
+    let uri = params.text_document.uri.clone();
     if let Some(content) = self.document_map.lock().await.get_mut(&uri) {
       for change in params.content_changes {
         if change.range.is_none() {
           *content = change.text;
         }
       }
+    }
+
+    if let Some(content) = self.document_map.lock().await.get(&uri) {
+      self.analyze_document(uri, content.clone()).await;
     }
   }
 
@@ -89,6 +122,10 @@ impl LanguageServer for DictionaryLsp {
   async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
     self.signature_help_handler.on_signature_help(params).await
   }
+
+  // async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+  //   self.completion_handler.on_completion(params).await
+  // }
 }
 
 impl DictionaryLsp {
@@ -138,7 +175,10 @@ pub async fn run_server() {
   let (service, socket) = LspService::new(|client| {
     let hover_handler = HoverHandler::new(
       document_map.clone(),
-      config.dictionary_path.clone().expect(""),
+      config
+        .dictionary_path
+        .clone()
+        .expect("Dictionary path must be set"),
       config.clone(),
     );
 
@@ -148,12 +188,19 @@ pub async fn run_server() {
       config.clone(),
     );
 
+    // let completion_handler = CompletionHandler::new(
+    //   document_map.clone(),
+    //   config.dictionary_path.clone(),
+    //   config.clone(),
+    // );
+
     DictionaryLsp {
       client,
       document_map,
       config: config.clone(),
       hover_handler,
       signature_help_handler,
+      // completion_handler,
     }
   });
 

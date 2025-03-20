@@ -5,7 +5,3 @@ pub mod dictionary_lsp;
 pub mod formatting;
 pub mod hover;
 pub mod signature_help;
-
-fn main() {
-  dictionary_lsp::run_server();
-}
