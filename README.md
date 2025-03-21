@@ -12,7 +12,7 @@
   <img src="./fig/showcase_sig.png" alt="textDocument/signatureHelp 示意图" width="80%">
 </div>
 
-Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查询系统，可以使用`textDocument/hover` 和 `textDocument/signatureHelp`帮助你在 neovim 等支持 LSP 协议的编辑器中快速查询单词释义。这是一个随作者成长会不断更新的项目，之后也许会基于 LSP 的特性更新更多的功能😆
+Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查询系统，可以使用`textDocument/hover` 和 `textDocument/signatureHelp`帮助你在 neovim 等支持 LSP 协议的编辑器中快速查询单词释义，使用`texDocument/CompletionItem` 实现带简单 fuzzy matcher 的自动补全 (受到![blink-cmp-dictionary](https://github.com/Kaiser-Yang/blink-cmp-dictionary)的启发，但现在反应比较迟钝，并且需要强化模糊匹配的速度与精度)。这是一个随作者成长会不断更新的项目，之后也许会基于 LSP 的特性更新更多的功能😆
 
 ## 安装、使用与配置
 
@@ -38,6 +38,9 @@ part_of_speech_format = "*{part}*"
 definition_format = "{num}. {definition}"
 example_format = "> *{example}*"
 add_spacing = true
+[fuzzy]
+max_distance = 2 # Maximum distance for fuzzy search
+# TODO: better fuzzy search algorithm and more configurations
 ```
 其中`{}`中的内容会被传递到变量之中。
 
