@@ -44,16 +44,6 @@ impl CompletionHandler {
           let mut items = Vec::with_capacity(words.len());
 
           for word in words {
-            let text_edit = TextEdit {
-              range: Range {
-                start: Position {
-                  line: position.line,
-                  character: start_pos,
-                },
-                end: position,
-              },
-              new_text: word.clone(),
-            };
             let mut definition = None;
             let mut out = word.clone();
 
@@ -71,6 +61,16 @@ impl CompletionHandler {
                 value: markdown,
               }));
             }
+            let text_edit = TextEdit {
+              range: Range {
+                start: Position {
+                  line: position.line,
+                  character: start_pos,
+                },
+                end: position,
+              },
+              new_text: out.clone(),
+            };
 
             // Create completion item
             let item = CompletionItem {
