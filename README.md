@@ -29,7 +29,7 @@ Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查�
     ]
   }
   ``` 
-的结构即可。将这个文件放置在 `~/dicts/dictionary.json` 中 (这是默认的字典存储位置) 即可完成配置。由于 JSON 文件解析所需的 IO 性能较差，我们也提供了 SQLite 数据库的支持，你可以将字典转换为 SQLite 数据库，然后放置在 `~/dicts/dictionary.db` 中即可。转换方式可以参考[#1](https://github.com/pxwg/dictionary_lsp/issues/1)。
+的结构即可。将这个文件放置在 `~/dicts/dictionary.json` 中 (这是默认的字典存储位置) 即可完成配置。由于 JSON 文件解析所需的 IO 性能较差 (因此没有实现对 JSON 字典源的模糊查找支持)，我们也提供了 SQLite 数据库的支持，你可以将字典转换为 SQLite 数据库，然后放置在 `~/dicts/dictionary.db` 中即可。转换方式可以参考[#1](https://github.com/pxwg/dictionary_lsp/issues/1)。
 
 如果你想要配置预览样式、字典路径等内容，可以参考 (这些不一定是默认配置)
 ```toml
