@@ -97,7 +97,6 @@ impl Config {
     let possible_paths = vec![
       dirs::config_dir().map(|p| p.join("dictionary-lsp/config.toml")),
       dirs::home_dir().map(|p| p.join(".config/dictionary-lsp/config.toml")),
-      Some(PathBuf::from("./dictionary-lsp.toml")),
     ];
 
     for path in possible_paths.into_iter().flatten() {
@@ -117,7 +116,6 @@ impl Config {
     let possible_paths = vec![
       dirs::config_dir().map(|p| p.join("dictionary-lsp/config.toml")),
       dirs::home_dir().map(|p| p.join(".config/dictionary-lsp/config.toml")),
-      Some(PathBuf::from("./dictionary-lsp.toml")),
     ];
 
     let path = possible_paths
