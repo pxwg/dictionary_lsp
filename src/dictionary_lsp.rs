@@ -32,6 +32,12 @@ impl LanguageServer for DictionaryLsp {
       capabilities: ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
+        execute_command_provider: Some(ExecuteCommandOptions {
+          commands: vec!["dictionary.toggle-cmp".to_string()],
+          work_done_progress_options: WorkDoneProgressOptions {
+            work_done_progress: Some(true),
+          },
+        }),
         signature_help_provider: Some(SignatureHelpOptions {
           trigger_characters: Some(vec![" ".to_string()]),
           retrigger_characters: Some(vec![" ".to_string()]),
@@ -109,8 +115,34 @@ impl LanguageServer for DictionaryLsp {
 
   /// Processes completion requests by looking up dictionary definitions for the word under the cursor.
   async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+    // if !self.config.completion.enabled {
+    //   return Ok(None);
+    // }
     self.completion_handler.on_completion(params).await
   }
+
+  // /// Processes execute command requests by toggling the dictionary completion provider.
+  // async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
+  //   let command: &str = params.command.as_ref();
+  //   match command {
+  //     "dictionary.toggle-cmp" => {
+  //       let token = NumberOrString::String("toggle-completion".to_string());
+  //
+  //       let mut config = Config::get();
+  //       config.completion.enabled = !config.completion.enabled;
+  //
+  //       let status = match config.completion.enabled {
+  //         true => "Completion is ON",
+  //         false => "Completion is OFF",
+  //       };
+  //
+  //       self.notify_work_done(token, status).await;
+  //
+  //       return Ok(Some(Value::from(config.completion.enabled.to_string())));
+  //     }
+  //     _ => Ok(None),
+  //   }
+  // }
 }
 
 impl DictionaryLsp {

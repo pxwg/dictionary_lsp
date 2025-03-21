@@ -345,7 +345,7 @@ impl DictionaryProvider for SqliteDictionaryProvider {
       }
     };
 
-    let max_number = Config::get().fuzzy.max_distance;
+    let max_number = Config::get().completion.max_distance;
     let query = format!("SELECT word FROM words WHERE word LIKE ?1 LIMIT {max_number}");
 
     let mut stmt = match conn.prepare(&query) {
