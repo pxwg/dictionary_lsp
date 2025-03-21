@@ -12,7 +12,11 @@
   <img src="./fig/showcase_sig.png" alt="textDocument/signatureHelp 示意图" width="80%">
 </div>
 
-Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查询系统，可以使用`textDocument/hover` 和 `textDocument/signatureHelp`帮助你在 neovim 等支持 LSP 协议的编辑器中快速查询单词释义，使用`texDocument/CompletionItem` 实现带简单 fuzzy matcher 的自动补全 (受到![blink-cmp-dictionary](https://github.com/Kaiser-Yang/blink-cmp-dictionary)的启发，但现在反应比较迟钝，并且需要强化模糊匹配的速度与精度)。这是一个随作者成长会不断更新的项目，之后也许会基于 LSP 的特性更新更多的功能😆
+Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查询系统，可以使用`textDocument/hover` 和 `textDocument/signatureHelp`帮助你在 neovim 等支持 LSP 协议的编辑器中快速查询单词释义，使用`texDocument/CompletionItem` 实现带简单 fuzzy matcher 的自动补全 (受到![blink-cmp-dictionary](https://github.com/Kaiser-Yang/blink-cmp-dictionary)的启发，但现在反应比较迟钝，并且需要强化模糊匹配的速度与精度)。
+
+**试试看！**当前主流的编辑器都具有极为简单的 LSP 支持，基于 LSP 的插件将会帮助你在一定程度上摆脱对编辑器插件的依赖，以编辑器的原生方式查询单词释义 (这通常是最为符合直觉的！)。
+
+这是一个随作者成长会不断更新的项目，之后会基于 LSP 的特性更新更多的功能😆
 
 ## 安装、使用与配置
 
@@ -74,11 +78,12 @@ max_distance = 2 # Maximum distance for fuzzy search
 - [x] 自定义 textDocument/hover 请求的返回文本格式⭐
 - [x] 支持 textDocument/signatureHelp 请求⭐(初步支持)
 - [x] 模糊查找 (初步完成，之后会基于更为流行的模糊匹配库，但这同样依赖于 SQLite 的实现)  
-- [ ] 自动补全⭐
+- [x] 自动补全⭐(初步支持，需要更强大的模糊匹配算法)
 - [ ] 添加单元测试⭐
 - [x] 配置文件指定字典位置
 - [x] 支持 SQLite 数据库⭐
 - [ ] 支持 csv 等格式的字典转换
+- [ ] 更强大的模糊匹配算法⭐
 - [ ] 实现 neovim 的兼容层，实现在文件编辑时主动添加生词、统计查询频率并调用等功能 (强烈依赖于 SQLite 的实现)⭐
 
 ## 背景
