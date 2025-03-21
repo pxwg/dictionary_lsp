@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::{Hover, HoverContents, HoverParams, MarkupContent, Mar
 
 pub struct HoverHandler {
   document_map: Arc<Mutex<HashMap<Url, String>>>,
-  dictionary_provider: Box<dyn DictionaryProvider>,
+  pub dictionary_provider: Box<dyn DictionaryProvider>,
   config: Config,
 }
 

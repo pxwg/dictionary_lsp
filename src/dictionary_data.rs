@@ -345,7 +345,7 @@ impl DictionaryProvider for SqliteDictionaryProvider {
       }
     };
 
-    let query = "SELECT word FROM words WHERE word LIKE ?1 AND word GLOB '[A-Za-z]*' AND word NOT GLOB '*[^A-Za-z]*' LIMIT 5";
+    let query = "SELECT word FROM words WHERE word LIKE ?1 || '%' AND length(word) < 20 AND word GLOB '[A-Za-z]*' AND word NOT GLOB '*[^A-Za-z]*' LIMIT 2";
 
     let mut stmt = match conn.prepare(query) {
       Ok(stmt) => stmt,
