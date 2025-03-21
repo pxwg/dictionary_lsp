@@ -1,4 +1,4 @@
-// pub mod completion;
+pub mod completion;
 pub mod config;
 pub mod dictionary_data;
 pub mod dictionary_lsp;
