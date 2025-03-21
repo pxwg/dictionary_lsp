@@ -12,7 +12,7 @@
   <img src="./fig/showcase_sig.png" alt="textDocument/signatureHelp 示意图" width="80%">
 </div>
 
-Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查询系统，可以使用`textDocument/hover` 和 `textDocument/signatureHelp`帮助你在 neovim 等支持 LSP 协议的编辑器中快速查询单词释义，使用`texDocument/CompletionItem` 实现带简单 fuzzy matcher 的自动补全 (受到![blink-cmp-dictionary](https://github.com/Kaiser-Yang/blink-cmp-dictionary)的启发，但现在反应比较迟钝，并且需要强化模糊匹配的速度与精度)。
+Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查询系统，可以使用`textDocument/hover` 和 `textDocument/signatureHelp`帮助你在 neovim 等支持 LSP 协议的编辑器中快速查询单词释义，使用`texDocument/CompletionItem` 实现带简单 fuzzy matcher 的自动补全 (受到[blink-cmp-dictionary](https://github.com/Kaiser-Yang/blink-cmp-dictionary)的启发，但现在反应比较迟钝，并且需要强化模糊匹配的速度与精度)。
 
 **试试看！**当前主流的编辑器都具有极为简单的 LSP 支持，基于 LSP 的插件将会帮助你在一定程度上摆脱对编辑器插件的依赖，以编辑器的原生方式查询单词释义 (这通常是最为符合直觉的！)。
 
@@ -42,8 +42,9 @@ part_of_speech_format = "*{part}*"
 definition_format = "{num}. {definition}"
 example_format = "> *{example}*"
 add_spacing = true
-[fuzzy]
+[completion]
 max_distance = 2 # Maximum distance for fuzzy search
+enabled = true
 # TODO: better fuzzy search algorithm and more configurations
 ```
 其中`{}`中的内容会被传递到变量之中。
@@ -68,7 +69,7 @@ max_distance = 2 # Maximum distance for fuzzy search
       -- Then set it up
       lspconfig.dictionary.setup({})
 ```  
-放在你的 `init.lua` 中即可使用。其他的编辑器请参考对应的 LSP 插件的配置方法。
+放在你的 `init.lua` 中即可使用。其他的编辑器请参考对应的 LSP 插件的配置方法。你可以向 LSP 发送`textDocument/executeCommand`命令`dictionary.enable_cmp`以控制不利于快速查询的配置，例如关闭自动补全等。如果你有一个非常快速的 LSP 源并且不希望在自动补全时被本 LSP 阻碍，可以善用这一命令来调和字典查询与快速补全的冲突。
 
 ## TODO
 
