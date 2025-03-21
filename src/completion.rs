@@ -1,4 +1,3 @@
-use crate::config::Config;
 use crate::dictionary_data::{self, DictionaryProvider};
 use crate::formatting;
 use std::collections::HashMap;
@@ -10,19 +9,13 @@ use tower_lsp::lsp_types::*;
 pub struct CompletionHandler {
   document_map: Arc<Mutex<HashMap<Url, String>>>,
   dictionary_path: String,
-  config: Config,
 }
 
 impl CompletionHandler {
-  pub fn new(
-    document_map: Arc<Mutex<HashMap<Url, String>>>,
-    dictionary_path: String,
-    config: Config,
-  ) -> Self {
+  pub fn new(document_map: Arc<Mutex<HashMap<Url, String>>>, dictionary_path: String) -> Self {
     CompletionHandler {
       document_map,
       dictionary_path,
-      config,
     }
   }
 
@@ -52,7 +45,7 @@ impl CompletionHandler {
                 // &word,
                 &response.word,
                 &response,
-                &self.config.formatting,
+                &crate::config::Config::get().formatting,
               );
               out = response.word.clone();
 

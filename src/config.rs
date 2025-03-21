@@ -1,9 +1,9 @@
 use crate::formatting::FormattingConfig;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Config {
   pub formatting: FormattingConfig,
@@ -23,12 +23,10 @@ pub struct ConfigManager {
 }
 
 // Singleton instance for global config access
-lazy_static::lazy_static! {
-  static ref CONFIG_MANAGER: ConfigManager = ConfigManager::new();
-}
+static CONFIG_MANAGER: Lazy<Mutex<Config>> = Lazy::new(|| Mutex::new(Config::load_from_disk()));
 
 impl ConfigManager {
-  fn new() -> Self {
+  pub fn new() -> Self {
     let config = Config::load_from_disk();
     // debug output
     // eprintln!("Loaded config: {:#?}", config);
@@ -37,9 +35,9 @@ impl ConfigManager {
     }
   }
 
-  // Get a clone of the current config
+  // Then get_config can be used as:
   pub fn get_config() -> Config {
-    CONFIG_MANAGER.config.lock().unwrap().clone()
+    CONFIG_MANAGER.lock().unwrap().clone()
   }
 
   // Update the in-memory config
@@ -47,7 +45,7 @@ impl ConfigManager {
   where
     F: FnOnce(&mut Config),
   {
-    let mut config = CONFIG_MANAGER.config.lock().unwrap();
+    let mut config = CONFIG_MANAGER.lock().unwrap();
     update_fn(&mut config);
     config.clone()
   }
@@ -79,6 +77,20 @@ impl Default for Config {
 }
 
 impl Config {
+  // Get the current global configuration
+  pub fn get() -> Self {
+    CONFIG_MANAGER.lock().unwrap().clone()
+  }
+
+  // Update the configuration in memory only (no write to disk)
+  pub fn update<F>(update_fn: F)
+  where
+    F: FnOnce(&mut Config),
+  {
+    let mut config = CONFIG_MANAGER.lock().unwrap();
+    update_fn(&mut config);
+  }
+
   pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
     let contents = fs::read_to_string(path)?;
     let config: Config = toml::from_str(&contents)?;
@@ -128,10 +140,5 @@ impl Config {
     let toml = toml::to_string(config)?;
     fs::write(&path, toml)?;
     Ok(path)
-  }
-
-  // Compatibility function for existing code
-  pub fn get() -> Self {
-    ConfigManager::get_config()
   }
 }
