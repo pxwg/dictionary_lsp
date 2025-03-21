@@ -94,14 +94,13 @@ impl Config {
 
   // Load config from disk
   pub fn load_from_disk() -> Self {
-    let possible_paths = vec![
-      dirs::config_dir().map(|p| p.join("dictionary-lsp/config.toml")),
-      dirs::home_dir().map(|p| p.join(".config/dictionary-lsp/config.toml")),
-    ];
+    let possible_paths =
+      vec![dirs::home_dir().map(|p| p.join(".config/dictionary-lsp/config.toml"))];
 
     for path in possible_paths.into_iter().flatten() {
       if let Ok(config) = Self::load_from_file(&path) {
-        eprintln!("Loaded config from: {}", path.display());
+        // debug output
+        // eprintln!("Loaded config from: {}", path.display());
         return config;
       }
     }
@@ -113,10 +112,8 @@ impl Config {
   pub fn save_to_disk(
     config: &Config,
   ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
-    let possible_paths = vec![
-      dirs::config_dir().map(|p| p.join("dictionary-lsp/config.toml")),
-      dirs::home_dir().map(|p| p.join(".config/dictionary-lsp/config.toml")),
-    ];
+    let possible_paths =
+      vec![dirs::home_dir().map(|p| p.join(".config/dictionary-lsp/config.toml"))];
 
     let path = possible_paths
       .into_iter()
