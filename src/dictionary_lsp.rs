@@ -137,21 +137,12 @@ impl LanguageServer for DictionaryLsp {
     };
     match command {
       "dictionary.toggle-cmp" => {
-        // Use the ConfigManager to update and save the config
-        let result = config::ConfigManager::update_and_save_config(|config| {
+        // Update the in-memory config only
+        Config::update(|config| {
           config.completion.enabled = !config.completion.enabled;
         });
 
-        let (config, _) = match result {
-          Ok(data) => data,
-          Err(e) => {
-            self
-              .client
-              .show_message(MessageType::ERROR, format!("Failed to save config: {}", e))
-              .await;
-            return Ok(Some(Value::from(false)));
-          }
-        };
+        let config = Config::get();
         let status = match config.completion.enabled {
           true => "Completion is ON",
           false => "Completion is OFF",
@@ -250,7 +241,11 @@ pub async fn run_server() {
   let stdin = tokio::io::stdin();
   let stdout = tokio::io::stdout();
 
-  let config = config::ConfigManager::get_config();
+  let config = Config::load_from_disk();
+  // eprint!(
+  //   "Loaded config from: {}",
+  //   config.dictionary_path.clone().unwrap()
+  // );
 
   // Create a shared document map wrapped in an Arc
   let document_map = Arc::new(Mutex::new(HashMap::<Url, String>::new()));
@@ -277,7 +272,6 @@ pub async fn run_server() {
         .dictionary_path
         .clone()
         .expect("Dictionary path must be set"),
-      config.clone(),
     );
 
     DictionaryLsp {

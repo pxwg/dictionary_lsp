@@ -48,7 +48,7 @@ impl HoverHandler {
       match self.dictionary_provider.get_meaning(&word).await {
         Ok(Some(response)) => {
           // Format the response as Markdown
-          eprintln!("{}", &word);
+          // eprintln!("{}", &word);
           let markdown = formatting::format_definition_as_markdown_with_config(
             &response.word,
             &response,
