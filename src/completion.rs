@@ -55,13 +55,16 @@ impl CompletionHandler {
               new_text: word.clone(),
             };
             let mut definition = None;
+            let mut out = word.clone();
 
             if let Ok(Some(response)) = provider.get_meaning(&word).await {
               let markdown = formatting::format_definition_as_markdown_with_config(
+                // &word,
                 &response.word,
                 &response,
                 &self.config.formatting,
               );
+              out = response.word.clone();
 
               definition = Some(Documentation::MarkupContent(MarkupContent {
                 kind: MarkupKind::Markdown,
@@ -71,7 +74,7 @@ impl CompletionHandler {
 
             // Create completion item
             let item = CompletionItem {
-              label: word.clone(),
+              label: out,
               // TODO: add more completion item details and optional config
               kind: Some(CompletionItemKind::KEYWORD),
               documentation: definition,

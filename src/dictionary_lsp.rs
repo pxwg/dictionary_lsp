@@ -1,7 +1,8 @@
 use crate::completion::CompletionHandler;
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::hover::HoverHandler;
 use crate::signature_help::SignatureHelpHandler;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio;
@@ -115,34 +116,59 @@ impl LanguageServer for DictionaryLsp {
 
   /// Processes completion requests by looking up dictionary definitions for the word under the cursor.
   async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-    // if !self.config.completion.enabled {
-    //   return Ok(None);
-    // }
+    if !config::Config::get().completion.enabled {
+      return Ok(None);
+    }
     self.completion_handler.on_completion(params).await
   }
 
-  // /// Processes execute command requests by toggling the dictionary completion provider.
-  // async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
-  //   let command: &str = params.command.as_ref();
-  //   match command {
-  //     "dictionary.toggle-cmp" => {
-  //       let token = NumberOrString::String("toggle-completion".to_string());
-  //
-  //       let mut config = Config::get();
-  //       config.completion.enabled = !config.completion.enabled;
-  //
-  //       let status = match config.completion.enabled {
-  //         true => "Completion is ON",
-  //         false => "Completion is OFF",
-  //       };
-  //
-  //       self.notify_work_done(token, status).await;
-  //
-  //       return Ok(Some(Value::from(config.completion.enabled.to_string())));
-  //     }
-  //     _ => Ok(None),
-  //   }
-  // }
+  /// Processes execute command requests by toggling the dictionary completion provider.
+  /// I learn it from [rime-ls](https://github.com/wlh320/rime-ls)
+  async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
+    let command: &str = params.command.as_ref();
+    let token = {
+      match params.work_done_progress_params.work_done_token {
+        Some(token) => token,
+        None => {
+          let token = NumberOrString::String(command.to_string());
+          self.create_work_done_progress(token).await?
+        }
+      }
+    };
+    match command {
+      "dictionary.toggle-cmp" => {
+        // Use the ConfigManager to update and save the config
+        let result = config::ConfigManager::update_and_save_config(|config| {
+          config.completion.enabled = !config.completion.enabled;
+        });
+
+        let (config, _) = match result {
+          Ok(data) => data,
+          Err(e) => {
+            self
+              .client
+              .show_message(MessageType::ERROR, format!("Failed to save config: {}", e))
+              .await;
+            return Ok(Some(Value::from(false)));
+          }
+        };
+        let status = match config.completion.enabled {
+          true => "Completion is ON",
+          false => "Completion is OFF",
+        };
+        self.notify_work_done(token.clone(), status).await;
+        return Ok(Some(Value::from(config.completion.enabled)));
+      }
+
+      _ => {
+        self
+          .client
+          .show_message(MessageType::WARNING, "No such dictionary command")
+          .await;
+      }
+    }
+    Ok(None)
+  }
 }
 
 impl DictionaryLsp {
@@ -155,6 +181,46 @@ impl DictionaryLsp {
     self
       .client
       .publish_diagnostics(uri, diagnostics, None)
+      .await;
+  }
+
+  async fn create_work_done_progress(&self, token: NumberOrString) -> Result<NumberOrString> {
+    if let Err(e) = self
+      .client
+      .send_request::<request::WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
+        token: token.clone(),
+      })
+      .await
+    {
+      self.client.show_message(MessageType::WARNING, e).await;
+      return Err(tower_lsp::jsonrpc::Error::internal_error());
+    }
+    Ok(token)
+  }
+
+  // async fn notify_work_begin(&self, token: NumberOrString, message: &str) {
+  //   // begin
+  //   self
+  //     .client
+  //     .send_notification::<notification::Progress>(ProgressParams {
+  //       token,
+  //       value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(WorkDoneProgressBegin {
+  //         title: message.to_string(),
+  //         ..Default::default()
+  //       })),
+  //     })
+  //     .await;
+  // }
+
+  async fn notify_work_done(&self, token: NumberOrString, message: &str) {
+    self
+      .client
+      .send_notification::<notification::Progress>(ProgressParams {
+        token,
+        value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
+          message: Some(message.to_string()),
+        })),
+      })
       .await;
   }
 
@@ -184,7 +250,7 @@ pub async fn run_server() {
   let stdin = tokio::io::stdin();
   let stdout = tokio::io::stdout();
 
-  let config = Config::get();
+  let config = config::ConfigManager::get_config();
 
   // Create a shared document map wrapped in an Arc
   let document_map = Arc::new(Mutex::new(HashMap::<Url, String>::new()));
