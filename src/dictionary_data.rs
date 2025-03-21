@@ -345,9 +345,10 @@ impl DictionaryProvider for SqliteDictionaryProvider {
       }
     };
 
-    let query = "SELECT word FROM words WHERE word LIKE ?1 || '%' AND length(word) < 20 AND word GLOB '[A-Za-z]*' AND word NOT GLOB '*[^A-Za-z]*' LIMIT 2";
+    let max_number = Config::get().fuzzy.max_distance;
+    let query = format!("SELECT word FROM words WHERE word LIKE ?1 LIMIT {max_number}");
 
-    let mut stmt = match conn.prepare(query) {
+    let mut stmt = match conn.prepare(&query) {
       Ok(stmt) => stmt,
       Err(e) => {
         eprintln!("Error preparing statement: {}", e);

@@ -7,6 +7,12 @@ use std::path::{Path, PathBuf};
 pub struct Config {
   pub formatting: FormattingConfig,
   pub dictionary_path: Option<String>,
+  pub fuzzy: FuzzyConfig,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct FuzzyConfig {
+  pub max_distance: u8,
 }
 
 impl Default for Config {
@@ -14,6 +20,7 @@ impl Default for Config {
     Self {
       formatting: FormattingConfig::default(),
       dictionary_path: None,
+      fuzzy: FuzzyConfig { max_distance: 3 },
     }
   }
 }
