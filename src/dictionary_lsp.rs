@@ -128,8 +128,6 @@ impl LanguageServer for DictionaryLsp {
   }
 
   /// Processes execute command requests by toggling the dictionary completion provider.
-
-  /// Processes execute command requests by toggling the dictionary completion provider.
   /// I learn it from [rime-ls](https://github.com/wlh320/rime-ls)
   async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
     let command: &str = params.command.as_ref();
