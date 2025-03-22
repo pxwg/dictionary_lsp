@@ -47,27 +47,40 @@ pub trait DictionaryProvider: Send + Sync {
 }
 
 /// Factory function to create the appropriate dictionary provider
-pub fn create_dictionary_provider(dictionary_path: Option<String>) -> Box<dyn DictionaryProvider> {
+pub fn create_dictionary_provider(
+  dictionary_path: Option<String>,
+  freq_path: Option<String>,
+) -> Box<dyn DictionaryProvider> {
   if Config::is_sqlite(dictionary_path.as_deref()) {
-    Box::new(SqliteDictionaryProvider::new(dictionary_path))
+    Box::new(SqliteDictionaryProvider::new(dictionary_path, freq_path))
   } else {
-    Box::new(JsonDictionaryProvider::new(dictionary_path))
+    Box::new(JsonDictionaryProvider::new(dictionary_path, freq_path))
   }
 }
 
 /// Provider implementation for SQLite dictionaries
 pub struct SqliteDictionaryProvider {
   dictionary_path: Option<String>,
+  freq_path: Option<String>,
 }
 
 impl SqliteDictionaryProvider {
-  pub fn new(dictionary_path: Option<String>) -> Self {
-    Self { dictionary_path }
+  pub fn new(dictionary_path: Option<String>, freq_path: Option<String>) -> Self {
+    Self {
+      dictionary_path,
+      freq_path,
+    }
   }
   fn get_dictionary_path(&self) -> Result<String> {
     match &self.dictionary_path {
       Some(path) => Ok(path.clone()),
       None => Err(Error::invalid_params("Dictionary path not provided")),
+    }
+  }
+  fn get_freq_path(&self) -> Result<String> {
+    match &self.freq_path {
+      Some(path) => Ok(path.clone()),
+      None => Err(Error::invalid_params("Frequency path not provided")),
     }
   }
   fn get_safe_string(row: &rusqlite::Row, idx: usize) -> Option<String> {
@@ -335,9 +348,10 @@ impl DictionaryProvider for SqliteDictionaryProvider {
   }
 
   async fn find_words_by_prefix(&self, prefix: &str) -> Result<Option<Vec<String>>> {
-    let dict_path = &self.get_dictionary_path()?;
+    // let dict_path = &self.get_dictionary_path()?;
+    let freq_path = &self.get_freq_path()?;
 
-    let conn = match rusqlite::Connection::open(&dict_path) {
+    let conn = match rusqlite::Connection::open(&freq_path) {
       Ok(conn) => conn,
       Err(e) => {
         eprintln!("Error connecting to SQLite database: {}", e);
@@ -346,7 +360,9 @@ impl DictionaryProvider for SqliteDictionaryProvider {
     };
 
     let max_number = Config::get().completion.max_distance;
-    let query = format!("SELECT word FROM words WHERE word LIKE ?1 LIMIT {max_number}");
+    let query = format!(
+      "SELECT word FROM word_frequencies WHERE word LIKE ?1 ORDER BY frequency DESC LIMIT {max_number}"
+    );
 
     let mut stmt = match conn.prepare(&query) {
       Ok(stmt) => stmt,
@@ -389,11 +405,15 @@ impl DictionaryProvider for SqliteDictionaryProvider {
 /// Provider implementation for JSON dictionaries
 pub struct JsonDictionaryProvider {
   dictionary_path: Option<String>,
+  freq_path: Option<String>,
 }
 
 impl JsonDictionaryProvider {
-  pub fn new(dictionary_path: Option<String>) -> Self {
-    Self { dictionary_path }
+  pub fn new(dictionary_path: Option<String>, freq_path: Option<String>) -> Self {
+    Self {
+      dictionary_path,
+      freq_path,
+    }
   }
 
   fn get_dictionary_path(&self) -> Result<String> {

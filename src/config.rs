@@ -9,6 +9,7 @@ pub struct Config {
   pub formatting: FormattingConfig,
   pub dictionary_path: Option<String>,
   pub completion: CmpConfig,
+  pub freq_path: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -68,6 +69,7 @@ impl Default for Config {
     Self {
       formatting: FormattingConfig::default(),
       dictionary_path: None,
+      freq_path: None,
       completion: CmpConfig {
         max_distance: 3,
         enabled: true,

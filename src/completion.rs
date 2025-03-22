@@ -9,13 +9,19 @@ use tower_lsp::lsp_types::*;
 pub struct CompletionHandler {
   document_map: Arc<Mutex<HashMap<Url, String>>>,
   dictionary_path: String,
+  freq_path: String,
 }
 
 impl CompletionHandler {
-  pub fn new(document_map: Arc<Mutex<HashMap<Url, String>>>, dictionary_path: String) -> Self {
+  pub fn new(
+    document_map: Arc<Mutex<HashMap<Url, String>>>,
+    dictionary_path: String,
+    freq_path: String,
+  ) -> Self {
     CompletionHandler {
       document_map,
       dictionary_path,
+      freq_path,
     }
   }
 
@@ -30,8 +36,10 @@ impl CompletionHandler {
       if let Some((current_word, start_pos)) =
         self.get_current_word_and_start(content, position).await
       {
-        let provider =
-          dictionary_data::SqliteDictionaryProvider::new(Some(self.dictionary_path.clone()));
+        let provider = dictionary_data::SqliteDictionaryProvider::new(
+          Some(self.dictionary_path.clone()),
+          Some(self.freq_path.clone()),
+        );
 
         if let Ok(Some(words)) = provider.find_words_by_prefix(&current_word).await {
           let mut items = Vec::with_capacity(words.len());
