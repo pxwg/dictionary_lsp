@@ -1,5 +1,8 @@
+use crate::config::Config;
 use crate::dictionary_data::{self, DictionaryProvider};
-use crate::formatting;
+use crate::formatting::{self, FormattingConfig};
+use futures;
+use serde_json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -32,88 +35,105 @@ impl CompletionHandler {
     let document_uri = params.text_document_position.text_document.uri.clone();
     let position = params.text_document_position.position;
 
-    if let Some(content) = self.document_map.lock().await.get(&document_uri) {
-      if let Some((current_word, start_pos)) =
-        self.get_current_word_and_start(content, position).await
-      {
-        let provider = dictionary_data::SqliteDictionaryProvider::new(
+    let content = match self.document_map.lock().await.get(&document_uri) {
+      Some(content) => content.clone(),
+      None => return Ok(None),
+    };
+
+    let (current_word, start_pos) = match self.get_current_word_and_start(&content, position).await
+    {
+      Some(result) => result,
+      None => return Ok(None),
+    };
+
+    // Early return for very short words (optional, can be configured)
+    if current_word.len() < 2 {
+      return Ok(None);
+    }
+
+    let provider = dictionary_data::SqliteDictionaryProvider::new(
+      Some(self.dictionary_path.clone()),
+      Some(self.freq_path.clone()),
+    );
+
+    let words = match provider.find_words_by_prefix(&current_word).await {
+      Ok(Some(words)) => words,
+      _ => return Ok(None),
+    };
+
+    if words.is_empty() {
+      return Ok(None);
+    }
+
+    // Pre-allocate with capacity for better performance
+    let mut items = Vec::with_capacity(words.len());
+
+    // Fetch all definitions concurrently using futures
+    use futures::future::join_all;
+    let meaning_futures: Vec<_> = words
+      .iter()
+      .map(|word| {
+        let provider_clone = dictionary_data::SqliteDictionaryProvider::new(
           Some(self.dictionary_path.clone()),
           Some(self.freq_path.clone()),
         );
+        let word_clone = word.clone();
+        async move {
+          let meaning = provider_clone.get_meaning(&word_clone).await.ok().flatten();
+          (word_clone, meaning)
+        }
+      })
+      .collect();
 
-        if let Ok(Some(words)) = provider.find_words_by_prefix(&current_word).await {
-          let mut items = Vec::with_capacity(words.len());
+    // Wait for all futures to complete
+    let word_meanings = join_all(meaning_futures).await;
 
-          for word in words {
-            let mut definition = None;
-            let mut out = word.clone();
+    // Process words and their meanings
+    for (word, meaning) in word_meanings {
+      let text_edit = TextEdit {
+        range: Range {
+          start: Position {
+            line: position.line,
+            character: start_pos,
+          },
+          end: position,
+        },
+        new_text: word.clone(),
+      };
 
-            if let Ok(Some(response)) = provider.get_meaning(&word).await {
-              let markdown = formatting::format_definition_as_markdown_with_config(
-                // &word,
-                &response.word,
-                &response,
-                &crate::config::Config::get().formatting,
-              );
-              // Preserve capitalization from the current word or original word
-              out = if (current_word
-                .chars()
-                .next()
-                .map_or(false, |c| c.is_uppercase())
-                || word.chars().next().map_or(false, |c| c.is_uppercase()))
-                && !response.word.is_empty()
-                && response.word.chars().next().unwrap().is_lowercase()
-              {
-                let mut result = response.word.clone();
-                if let Some(first_char) = result.get_mut(0..1) {
-                  first_char.make_ascii_uppercase();
-                }
-                result
-              } else {
-                response.word.clone()
-              };
+      // let data = serde_json::to_value(word.clone()).unwrap_or_default();
 
-              definition = Some(Documentation::MarkupContent(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: markdown,
-              }));
-            }
-            let text_edit = TextEdit {
-              range: Range {
-                start: Position {
-                  line: position.line,
-                  character: start_pos,
-                },
-                end: position,
-              },
-              new_text: out.clone(),
-            };
+      // Create completion item with pre-fetched documentation if available
+      let mut item = CompletionItem {
+        label: word.clone(),
+        kind: Some(CompletionItemKind::KEYWORD),
+        text_edit: Some(CompletionTextEdit::Edit(text_edit)),
+        // data: Some(data),
+        ..Default::default()
+      };
 
-            // Create completion item
-            let item = CompletionItem {
-              label: out,
-              // TODO: add more completion item details and optional config
-              kind: Some(CompletionItemKind::KEYWORD),
-              documentation: definition,
-              text_edit: Some(CompletionTextEdit::Edit(text_edit)),
-              ..Default::default()
-            };
+      if let Some(meaning) = meaning {
+        let documentation = formatting::format_definition_as_markdown(&word, &meaning);
 
-            items.push(item);
-          }
-
-          let list = CompletionList {
-            is_incomplete: true,
-            items,
-          };
-
-          return Ok(Some(CompletionResponse::List(list)));
+        if !documentation.is_empty() {
+          item.documentation = Some(Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: documentation,
+          }));
         }
       }
+
+      items.push(item);
     }
 
-    Ok(None)
+    let list = CompletionList {
+      is_incomplete: items.len() >= Config::get().completion.max_distance as usize,
+      items,
+    };
+
+    Ok(Some(CompletionResponse::List(list)))
   }
+
   async fn get_current_word_and_start(
     &self,
     content: &str,
@@ -169,5 +189,46 @@ impl CompletionHandler {
       let start_char_count = line[..start_byte_idx].chars().count() as u32;
       Some((current_word, start_char_count))
     }
+  }
+
+  /// Resolves additional information for a completion item by fetching its definition
+  pub async fn resolve_completion_item(&self, mut item: CompletionItem) -> Result<CompletionItem> {
+    // Extract the word from the item's data
+    if let Some(data) = &item.data {
+      if let Ok(word) = serde_json::from_value::<String>(data.clone()) {
+        // Create a provider to look up the definition
+        let provider = dictionary_data::SqliteDictionaryProvider::new(
+          Some(self.dictionary_path.clone()),
+          Some(self.freq_path.clone()),
+        );
+
+        // Get the meaning for the word
+        if let Ok(Some(meaning)) = provider.get_meaning(&word).await {
+          let mut documentation = String::new();
+
+          // Format the meaning into Markdown for the documentation
+          for m in &meaning.meanings {
+            documentation.push_str(&format!("### {}\n\n", m.part_of_speech));
+
+            for (i, def) in m.definitions.iter().enumerate() {
+              documentation.push_str(&format!("{}. {}\n", i + 1, def.definition));
+              if let Some(example) = &def.example {
+                documentation.push_str(&format!("> {}\n\n", example));
+              }
+            }
+          }
+
+          // Add the documentation to the completion item
+          if !documentation.is_empty() {
+            item.documentation = Some(Documentation::MarkupContent(MarkupContent {
+              kind: MarkupKind::Markdown,
+              value: documentation,
+            }));
+          }
+        }
+      }
+    }
+
+    Ok(item)
   }
 }

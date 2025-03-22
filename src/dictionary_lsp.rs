@@ -45,7 +45,7 @@ impl LanguageServer for DictionaryLsp {
           work_done_progress_options: Default::default(),
         }),
         completion_provider: Some(CompletionOptions {
-          resolve_provider: Some(false),
+          resolve_provider: Some(true),
           completion_item: Some(CompletionOptionsCompletionItem {
             label_details_support: Some(true),
           }),
@@ -121,6 +121,13 @@ impl LanguageServer for DictionaryLsp {
     }
     self.completion_handler.on_completion(params).await
   }
+
+  /// Resolves additional information for a completion item
+  async fn completion_resolve(&self, item: CompletionItem) -> Result<CompletionItem> {
+    self.completion_handler.resolve_completion_item(item).await
+  }
+
+  /// Processes execute command requests by toggling the dictionary completion provider.
 
   /// Processes execute command requests by toggling the dictionary completion provider.
   /// I learn it from [rime-ls](https://github.com/wlh320/rime-ls)

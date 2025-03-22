@@ -62,6 +62,8 @@ pub fn create_dictionary_provider(
 pub struct SqliteDictionaryProvider {
   dictionary_path: Option<String>,
   freq_path: Option<String>,
+  dictionary_conn: tokio::sync::Mutex<Option<rusqlite::Connection>>,
+  freq_conn: tokio::sync::Mutex<Option<rusqlite::Connection>>,
 }
 
 impl SqliteDictionaryProvider {
@@ -69,6 +71,8 @@ impl SqliteDictionaryProvider {
     Self {
       dictionary_path,
       freq_path,
+      dictionary_conn: tokio::sync::Mutex::new(None),
+      freq_conn: tokio::sync::Mutex::new(None),
     }
   }
   fn get_dictionary_path(&self) -> Result<String> {
@@ -321,15 +325,15 @@ impl DictionaryProvider for SqliteDictionaryProvider {
   async fn get_meaning(&self, word: &str) -> Result<Option<DictionaryResponse>> {
     let word_lower = word;
 
-    let dict_path = &self.get_dictionary_path()?;
-
-    let conn = match rusqlite::Connection::open(&dict_path) {
-      Ok(conn) => conn,
-      Err(e) => {
-        eprintln!("Error connecting to SQLite database: {}", e);
-        return Err(Error::internal_error());
-      }
-    };
+    let mut conn_guard = self.dictionary_conn.lock().await;
+    if conn_guard.is_none() {
+      let dict_path = self.get_dictionary_path()?;
+      *conn_guard = Some(rusqlite::Connection::open(&dict_path).map_err(|e| {
+        eprintln!("error connecting to sqlite database: {}", e);
+        Error::internal_error()
+      })?);
+    }
+    let conn = conn_guard.as_ref().unwrap();
 
     if let Some(response) = self.find_exact_match(&conn, &word_lower)? {
       return Ok(Some(response));
@@ -339,7 +343,7 @@ impl DictionaryProvider for SqliteDictionaryProvider {
       return Ok(Some(response));
     }
 
-    // No matches found
+    // no matches found
     Ok(None)
   }
 
@@ -348,36 +352,35 @@ impl DictionaryProvider for SqliteDictionaryProvider {
   }
 
   async fn find_words_by_prefix(&self, prefix: &str) -> Result<Option<Vec<String>>> {
-    // let dict_path = &self.get_dictionary_path()?;
-    let freq_path = &self.get_freq_path()?;
+    // Get or initialize the frequency database connection
+    let mut conn_guard = self.freq_conn.lock().await;
+    if conn_guard.is_none() {
+      let freq_path = self.get_freq_path()?;
+      *conn_guard = Some(rusqlite::Connection::open(&freq_path).map_err(|e| {
+        eprintln!("Error connecting to SQLite frequency database: {}", e);
+        Error::internal_error()
+      })?);
+    }
+    let conn = conn_guard.as_ref().unwrap();
 
-    let conn = match rusqlite::Connection::open(&freq_path) {
-      Ok(conn) => conn,
-      Err(e) => {
-        eprintln!("Error connecting to SQLite database: {}", e);
-        return Err(Error::internal_error());
-      }
-    };
+    let max_number = Config::get().completion.max_distance as usize;
 
-    let max_number = Config::get().completion.max_distance;
-    let query = format!(
-      "SELECT word FROM word_frequencies WHERE word LIKE ?1 ORDER BY frequency DESC LIMIT {max_number}"
-    );
-
-    let mut stmt = match conn.prepare(&query) {
-      Ok(stmt) => stmt,
-      Err(e) => {
-        eprintln!("Error preparing statement: {}", e);
-        return Err(Error::internal_error());
-      }
-    };
-
+    let query =
+      "SELECT word FROM word_frequencies WHERE word LIKE ?1 ORDER BY frequency DESC LIMIT ?2";
     let param = format!("{}%", prefix);
-    let rows = stmt.query_map([param], |row| row.get::<_, String>(0));
+
+    let mut stmt = conn.prepare(query).map_err(|e| {
+      eprintln!("Error preparing statement: {}", e);
+      Error::internal_error()
+    })?;
+
+    let rows = stmt.query_map([param, max_number.to_string()], |row| {
+      row.get::<_, String>(0)
+    });
 
     match rows {
       Ok(mapped_rows) => {
-        let mut words = Vec::new();
+        let mut words = Vec::with_capacity(max_number);
         for word_result in mapped_rows {
           match word_result {
             Ok(word) => words.push(word),
