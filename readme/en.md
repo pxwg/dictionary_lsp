@@ -90,9 +90,9 @@ Here are some things I want to do; particularly desired ones are marked with ⭐
 - [x] Custom text format for textDocument/hover responses⭐
 - [x] Support for textDocument/signatureHelp requests⭐(basic support)
 - [x] Fuzzy search (initially completed, will be based on more popular fuzzy matching libraries later, but this also depends on SQLite implementation)  
-- [x] Autocomplete⭐(now implemented frequency-based autocomplete, at the cost of an extra SQLite database. Using small libraries to trade space for time)
+- [ ] Autocomplete⭐(now implemented frequency-based autocomplete, at the cost of an extra SQLite database. Using small libraries to trade space for time)
     - [ ] Add more intuitive autocomplete modes, including
-      - [ ] Case matching
+      - [x] Case matching
       - [ ] Root word matching
       - [ ] Fuzzy matching beyond frequency-based search
 - [ ] Add unit tests⭐(particularly desired, but may require code refactoring, abstracting specific business logic)
