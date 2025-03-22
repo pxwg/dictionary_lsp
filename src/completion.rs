@@ -55,7 +55,23 @@ impl CompletionHandler {
                 &response,
                 &crate::config::Config::get().formatting,
               );
-              out = response.word.clone();
+              // Preserve capitalization from the current word or original word
+              out = if (current_word
+                .chars()
+                .next()
+                .map_or(false, |c| c.is_uppercase())
+                || word.chars().next().map_or(false, |c| c.is_uppercase()))
+                && !response.word.is_empty()
+                && response.word.chars().next().unwrap().is_lowercase()
+              {
+                let mut result = response.word.clone();
+                if let Some(first_char) = result.get_mut(0..1) {
+                  first_char.make_ascii_uppercase();
+                }
+                result
+              } else {
+                response.word.clone()
+              };
 
               definition = Some(Documentation::MarkupContent(MarkupContent {
                 kind: MarkupKind::Markdown,
