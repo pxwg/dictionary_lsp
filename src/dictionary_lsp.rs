@@ -257,12 +257,17 @@ pub async fn run_server() {
         .dictionary_path
         .clone()
         .expect("Dictionary path must be set"),
+      config
+        .freq_path
+        .clone()
+        .expect("Frequency path must be set"),
       config.clone(),
     );
 
     let signature_help_handler = SignatureHelpHandler::new(
       document_map.clone(),
       config.dictionary_path.clone(),
+      config.freq_path.clone(),
       config.clone(),
     );
 
@@ -272,6 +277,10 @@ pub async fn run_server() {
         .dictionary_path
         .clone()
         .expect("Dictionary path must be set"),
+      config
+        .freq_path
+        .clone()
+        .expect("Frequency path must be set"),
     );
 
     DictionaryLsp {

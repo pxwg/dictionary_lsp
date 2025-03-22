@@ -20,11 +20,12 @@ impl SignatureHelpHandler {
   pub fn new(
     document_map: Arc<Mutex<HashMap<Url, String>>>,
     dictionary_path: Option<String>,
+    freq_path: Option<String>,
     config: Config,
   ) -> Self {
     Self {
       document_map,
-      dictionary_loader: create_dictionary_provider(dictionary_path),
+      dictionary_loader: create_dictionary_provider(dictionary_path, freq_path),
       config,
     }
   }

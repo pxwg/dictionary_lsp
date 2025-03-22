@@ -17,11 +17,12 @@ impl HoverHandler {
   pub fn new(
     document_map: Arc<Mutex<HashMap<Url, String>>>,
     dictionary_path: String,
+    freq_path: String,
     config: Config,
   ) -> Self {
     Self {
       document_map,
-      dictionary_provider: create_dictionary_provider(Some(dictionary_path)),
+      dictionary_provider: create_dictionary_provider(Some(dictionary_path), Some(freq_path)),
       config,
     }
   }
