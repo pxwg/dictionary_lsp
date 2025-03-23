@@ -96,6 +96,9 @@ Here are some things I want to do; particularly desired ones are marked with ⭐
       - [ ] Root word matching
       - [ ] Fuzzy matching beyond frequency-based search
 - [ ] Add unit tests⭐(particularly desired, but may require code refactoring, abstracting specific business logic)
+    - [ ] Hover
+    - [ ] SignatureHelp
+    - [x] Completion
 - [x] Configuration file specifying dictionary location
 - [x] Support for SQLite database⭐
 - [ ] Phrase lookup
