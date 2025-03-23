@@ -186,71 +186,103 @@ impl CompletionHandler {
     Ok(Some(CompletionResponse::List(list)))
   }
 
+  /// Extracts the current word and its starting position from the content at the given position
+  /// This function is enhaced to support CJK characters
+  /// ### expected behavior
+  /// 你好check$%^&你好你好test <---cursor plased here
+  /// should return "test" and the start position of "test" in the line
+  /// No need for the space between "你好" and "check" to be considered as a word
   async fn get_current_word_and_start(
     &self,
     content: &str,
     position: Position,
   ) -> Option<(String, u32)> {
-    let lines: Vec<&str> = content.lines().collect();
-    if position.line as usize >= lines.len() {
-      return None;
-    }
-    let line = lines[position.line as usize];
+    // Get the line at the cursor position
+    let line = content.lines().nth(position.line as usize)?;
 
-    // convert character position to byte index correctly
+    // Convert cursor position to byte index
     let char_pos = position.character as usize;
-    let char_indices = line.char_indices().collect::<Vec<_>>();
-    if char_pos > char_indices.len() {
-      return None;
-    }
-
+    let mut char_indices = line.char_indices();
     let before_cursor_end = if char_pos == 0 {
       0
-    } else if char_pos <= char_indices.len() {
-      char_indices[char_pos - 1].0 + char_indices[char_pos - 1].1.len_utf8()
     } else {
-      line.len()
+      // Find the byte index for the character at position
+      let mut last_idx = 0;
+      let mut last_char_len = 0;
+
+      for _ in 0..char_pos {
+        if let Some((idx, c)) = char_indices.next() {
+          last_idx = idx;
+          last_char_len = c.len_utf8();
+        } else {
+          return None; // Position is out of bounds
+        }
+      }
+      last_idx + last_char_len
     };
+
+    // Get text before cursor
     let before_cursor = &line[..before_cursor_end];
 
-    // Check if the string has Chinese+English pattern
+    // First, check for Chinese+English pattern
+    if let Some((english_part, start_char_count)) =
+      self.extract_english_after_chinese(before_cursor)
+    {
+      return Some((english_part, start_char_count));
+    }
+
+    // If the last character is CJK, return None
+    if let Some(last_char) = before_cursor.chars().last() {
+      if dictionary_data::is_cjk_char(last_char) {
+        return None;
+      }
+    }
+
+    // Extract alphabetic word before cursor
+    self.extract_alphabetic_word_before_cursor(before_cursor, line)
+  }
+
+  // Helper method to extract English part after Chinese characters
+  fn extract_english_after_chinese(&self, text: &str) -> Option<(String, u32)> {
     let mut english_start_idx = None;
     let mut has_chinese = false;
 
-    // Scan from left to right to find English characters after Chinese
-    for (i, c) in before_cursor.char_indices() {
+    // Scan from left to right
+    for (i, c) in text.char_indices() {
       if dictionary_data::is_cjk_char(c) {
         has_chinese = true;
-        english_start_idx = None; // Reset if we find another Chinese character
+        english_start_idx = None; // Reset on new Chinese character
       } else if has_chinese && c.is_alphabetic() && english_start_idx.is_none() {
-        // Found first English character after Chinese
         english_start_idx = Some(i);
       }
     }
 
-    // If we found a Chinese+English pattern, return just the English part
+    // If we found English after Chinese
     if let Some(start_idx) = english_start_idx {
-      let english_part = &before_cursor[start_idx..];
-      // Make sure it only contains alphabetic characters
+      let english_part = &text[start_idx..];
       if english_part.chars().all(|c| c.is_alphabetic()) && !english_part.is_empty() {
-        // Count characters (not bytes) before the start of English text
-        let start_char_count = line[..start_idx].chars().count() as u32;
+        let start_char_count = text[..start_idx].chars().count() as u32;
         return Some((english_part.to_string(), start_char_count));
       }
     }
 
-    // If no Chinese+English pattern is found, proceed with the original logic
-    if !before_cursor.is_empty() {
-      if let Some(last_char) = before_cursor.chars().last() {
-        if dictionary_data::is_cjk_char(last_char) {
-          return None;
-        }
-      }
+    None
+  }
+
+  // Helper method to extract alphabetic word before cursor
+  fn extract_alphabetic_word_before_cursor(
+    &self,
+    before_cursor: &str,
+    line: &str,
+  ) -> Option<(String, u32)> {
+    if before_cursor.is_empty() {
+      return None;
     }
 
-    let mut start_byte_idx = before_cursor_end;
+    let mut start_byte_idx = before_cursor.len();
     let mut word_chars = Vec::new();
 
+    // Scan backwards to find the word
     for (i, c) in before_cursor.char_indices().rev() {
       if !c.is_alphabetic() {
         break;
