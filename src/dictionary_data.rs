@@ -68,12 +68,33 @@ pub struct SqliteDictionaryProvider {
 
 impl SqliteDictionaryProvider {
   pub fn new(dictionary_path: Option<String>, freq_path: Option<String>) -> Self {
-    Self {
+    let mut provider = Self {
       dictionary_path,
       freq_path,
       dictionary_conn: tokio::sync::Mutex::new(None),
       freq_conn: tokio::sync::Mutex::new(None),
+    };
+
+    // Eagerly initialize connections if paths are available
+    if let Some(dict_path) = &provider.dictionary_path {
+      if let Ok(conn) = rusqlite::Connection::open(dict_path) {
+        let _ = std::mem::replace(
+          &mut *futures::executor::block_on(provider.dictionary_conn.lock()),
+          Some(conn),
+        );
+      }
     }
+
+    if let Some(freq_path) = &provider.freq_path {
+      if let Ok(conn) = rusqlite::Connection::open(freq_path) {
+        let _ = std::mem::replace(
+          &mut *futures::executor::block_on(provider.freq_conn.lock()),
+          Some(conn),
+        );
+      }
+    }
+
+    provider
   }
   fn get_dictionary_path(&self) -> Result<String> {
     match &self.dictionary_path {
@@ -409,14 +430,30 @@ impl DictionaryProvider for SqliteDictionaryProvider {
 pub struct JsonDictionaryProvider {
   dictionary_path: Option<String>,
   freq_path: Option<String>,
+  dictionary_cache: tokio::sync::Mutex<Option<serde_json::Value>>,
 }
 
 impl JsonDictionaryProvider {
   pub fn new(dictionary_path: Option<String>, freq_path: Option<String>) -> Self {
-    Self {
+    let mut provider = Self {
       dictionary_path,
       freq_path,
+      dictionary_cache: tokio::sync::Mutex::new(None),
+    };
+
+    // Eagerly load dictionary if path is available
+    if let Some(dict_path) = &provider.dictionary_path {
+      if let Ok(contents) = std::fs::read_to_string(dict_path) {
+        if let Ok(dict) = serde_json::from_str(&contents) {
+          let _ = std::mem::replace(
+            &mut *futures::executor::block_on(provider.dictionary_cache.lock()),
+            Some(dict),
+          );
+        }
+      }
     }
+
+    provider
   }
 
   fn get_dictionary_path(&self) -> Result<String> {
@@ -555,8 +592,16 @@ impl JsonDictionaryProvider {
 impl DictionaryProvider for JsonDictionaryProvider {
   async fn get_meaning(&self, word: &str) -> Result<Option<DictionaryResponse>> {
     let word_lower = word.to_lowercase();
-    let dict_path = self.get_dictionary_path()?;
-    let dictionary = self.read_dictionary_file(&dict_path)?;
+    let dictionary = match &*self.dictionary_cache.lock().await {
+      Some(dict) => dict.clone(),
+      None => {
+        let dict_path = self.get_dictionary_path()?;
+        let dict = self.read_dictionary_file(&dict_path)?;
+        let mut cache = self.dictionary_cache.lock().await;
+        *cache = Some(dict.clone());
+        dict
+      }
+    };
 
     if let Some(response) = self.find_exact_match(&dictionary, &word_lower) {
       return Ok(Some(response));
@@ -574,8 +619,16 @@ impl DictionaryProvider for JsonDictionaryProvider {
   }
 
   async fn find_words_by_prefix(&self, prefix: &str) -> Result<Option<Vec<String>>> {
-    let dict_path = self.get_dictionary_path()?;
-    let dictionary = self.read_dictionary_file(&dict_path)?;
+    let dictionary = match &*self.dictionary_cache.lock().await {
+      Some(dict) => dict.clone(),
+      None => {
+        let dict_path = self.get_dictionary_path()?;
+        let dict = self.read_dictionary_file(&dict_path)?;
+        let mut cache = self.dictionary_cache.lock().await;
+        *cache = Some(dict.clone());
+        dict
+      }
+    };
 
     if let Some(entries) = dictionary.as_object() {
       let prefix_lower = prefix.to_lowercase();
