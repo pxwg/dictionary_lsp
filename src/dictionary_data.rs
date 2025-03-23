@@ -366,7 +366,7 @@ impl DictionaryProvider for SqliteDictionaryProvider {
     let max_number = Config::get().completion.max_distance as usize;
 
     let query =
-      "SELECT word FROM word_frequencies WHERE word LIKE ?1 ORDER BY frequency DESC LIMIT ?2";
+      "SELECT word FROM word_frequencies WHERE word LIKE ?1 ORDER BY frequency DESC LIMIT ?1";
     let param = format!("{}%", prefix);
 
     let mut stmt = conn.prepare(query).map_err(|e| {
