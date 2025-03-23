@@ -80,6 +80,13 @@ impl CompletionHandler {
     })
   }
 
+  /// Completion request handler
+  /// ### expected behavior
+  /// - If the document is not found, return None
+  /// - If the current word is less than 2 characters, return None (boost performance)
+  /// - If the provider is available, use it to find words by prefix
+  /// wo -> word, world etc.
+  /// Wo -> Word, World etc. (respect capitalization)
   pub async fn on_completion(
     &self,
     params: CompletionParams,
@@ -98,24 +105,27 @@ impl CompletionHandler {
       None => return Ok(None),
     };
 
-    // Early return for very short words (optional, can be configured)
     if current_word.len() < 2 {
       return Ok(None);
     }
 
-    let provider = dictionary_data::create_dictionary_provider(
-      Some(self.dictionary_path.clone()),
-      Some(self.freq_path.clone()),
-    );
-
-    let words = match provider.find_words_by_prefix(&current_word).await {
-      Ok(Some(words)) => words,
-      _ => return Ok(None),
+    // Use the existing provider (which might be our mock in tests) if available,
+    // otherwise create a new one
+    let words = if let Some(provider) = &self.provider {
+      match provider.find_words_by_prefix(&current_word).await {
+        Ok(Some(words)) => words,
+        _ => return Ok(None),
+      }
+    } else {
+      let provider = dictionary_data::create_dictionary_provider(
+        Some(self.dictionary_path.clone()),
+        Some(self.freq_path.clone()),
+      );
+      match provider.find_words_by_prefix(&current_word).await {
+        Ok(Some(words)) => words,
+        _ => return Ok(None),
+      }
     };
-
-    if words.is_empty() {
-      return Ok(None);
-    }
 
     // Pre-allocate with capacity for better performance
     let mut items = Vec::with_capacity(words.len());
@@ -140,8 +150,26 @@ impl CompletionHandler {
     // Wait for all futures to complete
     let word_meanings = join_all(meaning_futures).await;
 
+    // Check if the first letter of current_word is uppercase
+    let starts_with_uppercase = current_word
+      .chars()
+      .next()
+      .map_or(false, |c| c.is_uppercase());
+
     // Process words and their meanings
     for (word, meaning) in word_meanings {
+      // Apply capitalization if needed
+      // Apply capitalization if needed - simplified logic
+      let final_word = if starts_with_uppercase && !word.is_empty() {
+        let mut capitalized = word.to_string();
+        if let Some(first_char) = capitalized.get_mut(0..1) {
+          first_char.make_ascii_uppercase();
+        }
+        capitalized
+      } else {
+        word.clone()
+      };
+
       let text_edit = TextEdit {
         range: Range {
           start: Position {
@@ -150,14 +178,14 @@ impl CompletionHandler {
           },
           end: position,
         },
-        new_text: word.clone(),
+        new_text: final_word.clone(),
       };
 
       // let data = serde_json::to_value(word.clone()).unwrap_or_default();
 
       // Create completion item with pre-fetched documentation if available
       let mut item = CompletionItem {
-        label: word.clone(),
+        label: final_word.clone(),
         kind: Some(CompletionItemKind::KEYWORD),
         text_edit: Some(CompletionTextEdit::Edit(text_edit)),
         // data: Some(data),
@@ -351,6 +379,7 @@ mod tests {
   use crate::dictionary_data::{DictionaryProvider, DictionaryResponse};
   use mockall::mock;
   use mockall::predicate::*;
+  use tokio::io::duplex;
   // Mock dictionary provider for testing
   mock! {
     DictionaryProvider {}
@@ -373,7 +402,6 @@ mod tests {
     handler
   }
 
-  // Test empty line
   #[tokio::test]
   async fn test_get_current_word_and_start_empty_line() {
     let handler = setup_test_handler();
@@ -387,7 +415,6 @@ mod tests {
     assert_eq!(result, None);
   }
 
-  // support for CJK characters
   #[tokio::test]
   async fn test_get_current_word_after_non_utf8_word() {
     let handler = setup_test_handler();
@@ -507,6 +534,77 @@ mod tests {
         }
       }
       None => panic!("No provider available"),
+    }
+  }
+
+  /// Test the end-to-end workflow for completion
+  /// ### expected behavior
+  /// test prefix "wo" should return "word" and "world"
+  /// test prefix "Wo" should return "Word" and "World"
+  /// Note: there is no need to test: "WO" because it would be the same as "wo" or refers to a
+  /// specific appr.
+  #[tokio::test]
+  async fn test_complete_end_to_end_workflow() {
+    let mut mock_dict = MockDictionaryProvider::new();
+    let test_prefix = "wo";
+    let test_prefix_1 = "Wo";
+    let expected_results = vec!["word".to_string(), "world".to_string()];
+
+    mock_dict
+      .expect_find_words_by_prefix()
+      .with(mockall::predicate::eq(test_prefix))
+      .times(1)
+      .returning(move |_| Ok(Some(expected_results.clone())));
+
+    let document_map = Arc::new(Mutex::new(HashMap::new()));
+    let test_uri = Url::parse("file:///test.txt").unwrap();
+    let test_content = "Hello wo".to_string();
+    document_map
+      .lock()
+      .await
+      .insert(test_uri.clone(), test_content);
+
+    let dict_path = "test_dict.db".to_string();
+    let freq_path = "test_freq.db".to_string();
+    let mut handler = CompletionHandler::new(document_map, dict_path, freq_path);
+
+    handler.provider = Some(Box::new(mock_dict));
+
+    let params = CompletionParams {
+      text_document_position: TextDocumentPositionParams {
+        text_document: TextDocumentIdentifier { uri: test_uri },
+        position: Position {
+          line: 0,
+          character: 8,
+        },
+      },
+      context: Some(CompletionContext {
+        trigger_kind: CompletionTriggerKind::INVOKED,
+        trigger_character: None,
+      }),
+      work_done_progress_params: WorkDoneProgressParams::default(),
+      partial_result_params: PartialResultParams::default(),
+    };
+
+    let completion_response = handler.on_completion(params).await;
+
+    match completion_response {
+      Ok(Some(CompletionResponse::List(list))) => {
+        assert_eq!(list.items.len(), 2);
+
+        let labels: Vec<&str> = list.items.iter().map(|item| item.label.as_str()).collect();
+        assert_eq!(labels, vec!["word", "world"]);
+
+        for item in list.items {
+          if let Some(CompletionTextEdit::Edit(edit)) = item.text_edit {
+            assert_eq!(edit.range.start.character, 6);
+            assert_eq!(edit.range.end.character, 8);
+          } else {
+            panic!("Expected CompletionTextEdit::Edit");
+          }
+        }
+      }
+      _ => panic!("Expected CompletionResponse::List"),
     }
   }
 }
