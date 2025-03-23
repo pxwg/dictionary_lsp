@@ -379,6 +379,7 @@ mod tests {
   use crate::dictionary_data::{DictionaryProvider, DictionaryResponse};
   use mockall::mock;
   use mockall::predicate::*;
+  use serde::de::Expected;
   use tokio::io::duplex;
   // Mock dictionary provider for testing
   mock! {
@@ -537,32 +538,24 @@ mod tests {
     }
   }
 
-  /// Test the end-to-end workflow for completion
-  /// ### expected behavior
-  /// test prefix "wo" should return "word" and "world"
-  /// test prefix "Wo" should return "Word" and "World"
-  /// Note: there is no need to test: "WO" because it would be the same as "wo" or refers to a
-  /// specific appr.
-  #[tokio::test]
-  async fn test_complete_end_to_end_workflow() {
+  async fn test_complete_end_to_end_workflow(test_prefix: &str, expected_results: Vec<String>) {
     let mut mock_dict = MockDictionaryProvider::new();
-    let test_prefix = "wo";
-    let test_prefix_1 = "Wo";
-    let expected_results = vec!["word".to_string(), "world".to_string()];
+    let expectation = expected_results.clone();
+    let test_prefix = test_prefix.to_string();
 
     mock_dict
       .expect_find_words_by_prefix()
-      .with(mockall::predicate::eq(test_prefix))
+      .with(mockall::predicate::eq(test_prefix.clone()))
       .times(1)
       .returning(move |_| Ok(Some(expected_results.clone())));
 
     let document_map = Arc::new(Mutex::new(HashMap::new()));
     let test_uri = Url::parse("file:///test.txt").unwrap();
-    let test_content = "Hello wo".to_string();
+    let test_content = format!("Hello &@^#(!(**@*@^#@&@^#)_+_|/?;><>>{}", test_prefix).to_string();
     document_map
       .lock()
       .await
-      .insert(test_uri.clone(), test_content);
+      .insert(test_uri.clone(), test_content.clone());
 
     let dict_path = "test_dict.db".to_string();
     let freq_path = "test_freq.db".to_string();
@@ -575,7 +568,7 @@ mod tests {
         text_document: TextDocumentIdentifier { uri: test_uri },
         position: Position {
           line: 0,
-          character: 8,
+          character: test_content.chars().count() as u32,
         },
       },
       context: Some(CompletionContext {
@@ -593,12 +586,18 @@ mod tests {
         assert_eq!(list.items.len(), 2);
 
         let labels: Vec<&str> = list.items.iter().map(|item| item.label.as_str()).collect();
-        assert_eq!(labels, vec!["word", "world"]);
+        assert_eq!(labels, expectation);
 
         for item in list.items {
           if let Some(CompletionTextEdit::Edit(edit)) = item.text_edit {
-            assert_eq!(edit.range.start.character, 6);
-            assert_eq!(edit.range.end.character, 8);
+            assert_eq!(
+              edit.range.start.character,
+              test_content.chars().count() as u32 - test_prefix.chars().count() as u32,
+            );
+            assert_eq!(
+              edit.range.end.character,
+              test_content.chars().count() as u32
+            );
           } else {
             panic!("Expected CompletionTextEdit::Edit");
           }
@@ -606,5 +605,16 @@ mod tests {
       }
       _ => panic!("Expected CompletionResponse::List"),
     }
+  }
+  /// Test the end-to-end workflow for completion
+  /// ### expected behavior
+  /// test prefix "wo" should return "word" and "world"
+  /// test prefix "Wo" should return "Word" and "World"
+  /// Note: there is no need to test: "WO" because it would be the same as "wo" or refers to a
+  /// specific appr.
+  #[tokio::test]
+  async fn test_complete() {
+    test_complete_end_to_end_workflow("wor", vec!["word".to_string(), "world".to_string()]).await;
+    test_complete_end_to_end_workflow("Wo", vec!["Word".to_string(), "World".to_string()]).await;
   }
 }
