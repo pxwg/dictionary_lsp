@@ -1,10 +1,10 @@
-use std::vec;
-
 use crate::config::Config;
+use crate::fuzzy;
 use async_trait::async_trait;
 use rusqlite;
 use serde::{Deserialize, Serialize};
 use serde_json;
+use std::vec;
 use tower_lsp::jsonrpc::Error;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::Position;
@@ -339,237 +339,6 @@ impl SqliteDictionaryProvider {
 
     matrix[len1][len2]
   }
-
-  /// Asynchronously generates words with Levenshtein distance 1 and 2 from the input word
-  async fn generate_levenshtein_candidates(
-    &self,
-    prefix: &str,
-    include_distance_2: bool,
-  ) -> Vec<String> {
-    // Skip empty words or very long words
-    if prefix.is_empty() {
-      return ('a'..='z').map(|c| c.to_string()).collect();
-    }
-
-    // Limit max word length to avoid excessive processing
-    if prefix.len() > 20 {
-      return Vec::with_capacity(0);
-    }
-
-    // Calculate approximate capacity needed
-    let char_count = prefix.chars().count();
-    let distance_1_capacity = if char_count < 5 {
-      // For short words, we'll generate fewer variations
-      char_count + (char_count + 1) * 26 + char_count * 25 + char_count.saturating_sub(1)
-    } else {
-      // For longer words, use a more moderate capacity
-      200
-    };
-
-    // For distance 2, we'll need much more space
-    let total_capacity = if include_distance_2 {
-      distance_1_capacity * 20
-    } else {
-      distance_1_capacity
-    };
-
-    // Use a HashSet to avoid duplicates when generating distance-2 words
-    let mut result_set = std::collections::HashSet::with_capacity(total_capacity);
-    result_set.insert(prefix.to_string());
-
-    // STEP 1: Prioritize completions - Add characters only at the end
-    // These are the highest priority candidates where prefix is preserved
-    if prefix.is_ascii() {
-      self.generate_prefix_completions_ascii(prefix, &mut result_set);
-    } else {
-      self.generate_prefix_completions_unicode(prefix, &mut result_set);
-    }
-
-    // Yield control to avoid blocking
-    tokio::task::yield_now().await;
-
-    // STEP 2: Only if we need more candidates, generate regular edit distance-1 words
-    // but prioritize keeping the beginning of the word intact
-    if prefix.is_ascii() {
-      self.generate_distance_1_ascii_modified(prefix, &mut result_set);
-    } else {
-      self.generate_distance_1_unicode_modified(prefix, &mut result_set);
-    }
-
-    // Yield control periodically to avoid blocking
-    tokio::task::yield_now().await;
-
-    // Generate distance-2 words if requested
-    if include_distance_2 {
-      // Take distance-1 words and generate more edits
-      let distance_1_vec: Vec<String> = result_set.iter().cloned().collect();
-
-      // Process in chunks to allow yielding
-      let chunk_size = 10;
-      for chunk in distance_1_vec.chunks(chunk_size) {
-        for base_word in chunk {
-          // For distance-2, we only want to complete words that preserved our prefix
-          if base_word.starts_with(prefix) {
-            if base_word.is_ascii() {
-              self.generate_prefix_completions_ascii(base_word, &mut result_set);
-            } else {
-              self.generate_prefix_completions_unicode(base_word, &mut result_set);
-            }
-          }
-        }
-
-        // Yield control after each chunk
-        tokio::task::yield_now().await;
-      }
-    }
-
-    // Convert to Vec for return
-    result_set.into_iter().collect()
-  }
-
-  /// Generate only suffix completions for ASCII words (preserve prefix)
-  fn generate_prefix_completions_ascii(
-    &self,
-    prefix: &str,
-    result_set: &mut std::collections::HashSet<String>,
-  ) {
-    let bytes = prefix.as_bytes();
-    let word_len = bytes.len();
-
-    // Only add characters at the end (suffix completions)
-    for c in b'a'..=b'z' {
-      let mut new_word = Vec::with_capacity(word_len + 1);
-      new_word.extend_from_slice(bytes);
-      new_word.push(c);
-
-      // Safety: we know the bytes are valid ASCII
-      unsafe {
-        result_set.insert(String::from_utf8_unchecked(new_word));
-      }
-    }
-  }
-
-  /// Generate only suffix completions for Unicode words (preserve prefix)
-  fn generate_prefix_completions_unicode(
-    &self,
-    prefix: &str,
-    result_set: &mut std::collections::HashSet<String>,
-  ) {
-    // Only add characters at the end (suffix completions)
-    for c in 'a'..='z' {
-      let mut new_word = String::with_capacity(prefix.len() + 1);
-      new_word.push_str(prefix);
-      new_word.push(c);
-      result_set.insert(new_word);
-    }
-  }
-
-  /// Modified ASCII word generator that prioritizes keeping the beginning intact
-  fn generate_distance_1_ascii_modified(
-    &self,
-    prefix: &str,
-    result_set: &mut std::collections::HashSet<String>,
-  ) {
-    let bytes = prefix.as_bytes();
-    let word_len = bytes.len();
-
-    // Insertion in middle (lower priority than suffix completions)
-    for i in 0..word_len {
-      for c in b'a'..=b'z' {
-        let mut new_word = Vec::with_capacity(word_len + 1);
-        new_word.extend_from_slice(&bytes[..i]);
-        new_word.push(c);
-        new_word.extend_from_slice(&bytes[i..]);
-
-        // Safety: we know the bytes are valid ASCII
-        unsafe {
-          result_set.insert(String::from_utf8_unchecked(new_word));
-        }
-      }
-    }
-
-    // Only modify characters in the latter half of the word
-    let modify_start = (word_len / 2).max(1);
-
-    // Substitutions (only in latter half to preserve prefix)
-    for i in modify_start..word_len {
-      let original = bytes[i];
-      for c in b'a'..=b'z' {
-        if c != original {
-          let mut new_word = bytes.to_vec();
-          new_word[i] = c;
-
-          // Safety: we know the bytes are valid ASCII
-          unsafe {
-            result_set.insert(String::from_utf8_unchecked(new_word));
-          }
-        }
-      }
-    }
-
-    // Deletions (only in latter half to preserve prefix)
-    for i in modify_start..word_len {
-      let mut new_word = Vec::with_capacity(word_len - 1);
-      new_word.extend_from_slice(&bytes[..i]);
-      new_word.extend_from_slice(&bytes[i + 1..]);
-
-      // Safety: we know the bytes are valid ASCII
-      unsafe {
-        result_set.insert(String::from_utf8_unchecked(new_word));
-      }
-    }
-  }
-
-  /// Modified Unicode word generator that prioritizes keeping the beginning intact
-  fn generate_distance_1_unicode_modified(
-    &self,
-    prefix: &str,
-    result_set: &mut std::collections::HashSet<String>,
-  ) {
-    let chars: Vec<char> = prefix.chars().collect();
-    let char_len = chars.len();
-
-    // Insertions in middle (lower priority than suffix completions)
-    for i in 0..char_len {
-      for c in 'a'..='z' {
-        let mut new_word = String::with_capacity(prefix.len() + 1);
-        for j in 0..i {
-          new_word.push(chars[j]);
-        }
-        new_word.push(c);
-        for j in i..char_len {
-          new_word.push(chars[j]);
-        }
-        result_set.insert(new_word);
-      }
-    }
-
-    // Only modify characters in the latter half of the word
-    let modify_start = (char_len / 2).max(1);
-
-    // Substitutions (only in latter half to preserve prefix)
-    for i in modify_start..char_len {
-      let original = chars[i];
-      for c in 'a'..='z' {
-        if c != original {
-          let mut new_word = chars.clone();
-          new_word[i] = c;
-          result_set.insert(new_word.into_iter().collect());
-        }
-      }
-    }
-
-    // Deletions (only in latter half to preserve prefix)
-    for i in modify_start..char_len {
-      let mut new_word = String::with_capacity(prefix.len() - 1);
-      for j in 0..char_len {
-        if j != i {
-          new_word.push(chars[j]);
-        }
-      }
-      result_set.insert(new_word);
-    }
-  }
 }
 
 #[async_trait]
@@ -607,9 +376,7 @@ impl DictionaryProvider for SqliteDictionaryProvider {
     // Generate candidate words with Levenshtein distance 1
     // For better completions, we can include distance-2 if needed
     let include_distance_2 = true;
-    let candidate_words = self
-      .generate_levenshtein_candidates(prefix, include_distance_2)
-      .await;
+    let candidate_words = fuzzy::generate_levenshtein_candidates(prefix, include_distance_2).await;
 
     if candidate_words.is_empty() {
       return Ok(None);
@@ -865,6 +632,11 @@ impl DictionaryProvider for JsonDictionaryProvider {
   }
 
   async fn find_words_by_prefix(&self, prefix: &str) -> Result<Option<Vec<String>>> {
+    // Always generate completions, even for single characters
+    if prefix.is_empty() {
+      return Ok(None);
+    }
+
     let dictionary = match &*self.dictionary_cache.lock().await {
       Some(dict) => dict.clone(),
       None => {
@@ -878,10 +650,12 @@ impl DictionaryProvider for JsonDictionaryProvider {
 
     if let Some(entries) = dictionary.as_object() {
       let prefix_lower = prefix.to_lowercase();
+      // Collect matching words, taking up to 100 for single character inputs
+      let limit = if prefix.len() <= 1 { 100 } else { 50 };
       let matching_words: Vec<String> = entries
         .keys()
         .filter(|word| word.to_lowercase().starts_with(&prefix_lower))
-        .take(50)
+        .take(limit)
         .map(|word| word.clone())
         .collect();
 
@@ -890,7 +664,13 @@ impl DictionaryProvider for JsonDictionaryProvider {
       }
     }
 
-    Ok(None)
+    // If no direct matches are found, use fuzzy matching
+    let candidates = fuzzy::generate_levenshtein_candidates(prefix, true).await;
+    if candidates.is_empty() {
+      Ok(None)
+    } else {
+      Ok(Some(candidates))
+    }
   }
 }
 

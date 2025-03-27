@@ -2,6 +2,7 @@ use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use rayon::prelude::*;
 use std::collections::HashSet;
+use std::path::Path;
 use tokio::task;
 
 static CANDIDATE_CACHE: Lazy<DashMap<String, Vec<String>>> =
