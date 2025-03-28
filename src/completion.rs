@@ -105,10 +105,6 @@ impl CompletionHandler {
       None => return Ok(None),
     };
 
-    if current_word.len() < 2 {
-      return Ok(None);
-    }
-
     // Use the existing provider (which might be our mock in tests) if available,
     // otherwise create a new one
     let words = if let Some(provider) = &self.provider {
@@ -379,8 +375,6 @@ mod tests {
   use crate::dictionary_data::{DictionaryProvider, DictionaryResponse};
   use mockall::mock;
   use mockall::predicate::*;
-  use serde::de::Expected;
-  use tokio::io::duplex;
   // Mock dictionary provider for testing
   mock! {
     DictionaryProvider {}
