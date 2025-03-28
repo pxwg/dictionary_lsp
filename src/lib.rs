@@ -6,3 +6,4 @@ pub mod formatting;
 pub mod fuzzy;
 pub mod hover;
 pub mod signature_help;
+pub mod tire;
