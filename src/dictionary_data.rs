@@ -64,15 +64,17 @@ pub struct SqliteDictionaryProvider {
   freq_path: Option<String>,
   dictionary_conn: tokio::sync::Mutex<Option<rusqlite::Connection>>,
   freq_conn: tokio::sync::Mutex<Option<rusqlite::Connection>>,
+  prefix_cache: tokio::sync::Mutex<(String, Vec<String>)>,
 }
 
 impl SqliteDictionaryProvider {
   pub fn new(dictionary_path: Option<String>, freq_path: Option<String>) -> Self {
-    let mut provider = Self {
+    let provider = Self {
       dictionary_path,
       freq_path,
       dictionary_conn: tokio::sync::Mutex::new(None),
       freq_conn: tokio::sync::Mutex::new(None),
+      prefix_cache: tokio::sync::Mutex::new((String::new(), Vec::new())),
     };
 
     // Eagerly initialize connections if paths are available
@@ -186,6 +188,22 @@ impl SqliteDictionaryProvider {
         Err(Error::internal_error())
       }
     }
+  }
+
+  // Function to enable benchmarking with controllable distance parameter
+  pub async fn find_words_by_prefix_with_distance(
+    &self,
+    prefix: &str,
+    include_distance_2: bool,
+  ) -> Result<Option<Vec<String>>> {
+    // Convert prefix to lowercase for case-insensitive search
+    let lowercase_prefix = prefix.to_lowercase();
+
+    // Generate candidate words with controllable distance parameter
+    let candidate_words =
+      fuzzy::generate_levenshtein_candidates(&lowercase_prefix, include_distance_2).await;
+
+    Ok(Some(candidate_words))
   }
 
   fn find_fuzzy_match(
@@ -372,35 +390,77 @@ impl DictionaryProvider for SqliteDictionaryProvider {
     extract_word_at_position(content, position)
   }
 
+  /// TODO: Add incremental search
+  /// Add thread pool
+  ///
+  /// Find words by prefix
   async fn find_words_by_prefix(&self, prefix: &str) -> Result<Option<Vec<String>>> {
-    // Generate candidate words with Levenshtein distance 1
-    // For better completions, we can include distance-2 if needed
-    let include_distance_2 = true;
-    let candidate_words = fuzzy::generate_levenshtein_candidates(prefix, include_distance_2).await;
-
-    if candidate_words.is_empty() {
+    // Check if the prefix is empty
+    if prefix.is_empty() {
       return Ok(None);
     }
 
-    // Clone data needed for the blocking operation
+    // Convert prefix to lowercase for case-insensitive search
+    let lowercase_prefix = prefix.to_lowercase();
+
+    // Check if we can use cached results
+    let mut cache = self.prefix_cache.lock().await;
+    let (cached_prefix, cached_results) = &*cache;
+
+    // If the new prefix extends the cached prefix, filter the cached results
+    if !cached_prefix.is_empty()
+      && lowercase_prefix.starts_with(cached_prefix)
+      && !cached_results.is_empty()
+      && lowercase_prefix != *cached_prefix
+    {
+      // Filter cached results that match the new prefix
+      let filtered: Vec<String> = cached_results
+        .iter()
+        .filter(|word| word.to_lowercase().starts_with(&lowercase_prefix))
+        .cloned()
+        .collect();
+
+      // If we found matches, update cache and return
+      if !filtered.is_empty() {
+        *cache = (lowercase_prefix.clone(), filtered.clone());
+        return Ok(Some(filtered));
+      }
+    }
+
+    // Try to use the global trie first
+    if crate::tire::is_trie_initialized() {
+      let results = crate::tire::find_words_by_prefix(&lowercase_prefix, 5);
+
+      // If we got results from the global trie, update cache and return
+      if !results.is_empty() {
+        *cache = (lowercase_prefix, results.clone());
+        return Ok(Some(results));
+      }
+    }
+
+    // Fallback to fuzzy search if trie doesn't have results
+    let mut candidate_words = fuzzy::generate_levenshtein_candidates(&lowercase_prefix, true).await;
+
+    candidate_words.push(lowercase_prefix.clone());
+
+    const MAX_CANDIDATES: usize = 100;
+    if candidate_words.len() > MAX_CANDIDATES {
+      candidate_words.truncate(MAX_CANDIDATES);
+    }
+
+    if candidate_words.is_empty() {
+      *cache = (String::new(), Vec::new()); // Clear cache on failure
+      return Ok(None);
+    }
+
     let freq_path = self.get_freq_path()?;
 
     // Process all candidates in one go since our generation is now more targeted
-    let candidates_clone = candidate_words.clone();
-
-    // Process database query in a blocking task
     let batch_results = tokio::task::spawn_blocking(move || -> Result<Vec<String>> {
-      // Open the database connection within the blocking task
-      let conn = rusqlite::Connection::open(&freq_path).map_err(|e| Error::internal_error())?;
-
-      // Create placeholders for SQL query
-      let placeholders = (0..candidates_clone.len())
-        .map(|i| format!("?{}", i + 1))
-        .collect::<Vec<String>>()
-        .join(",");
+      let conn = rusqlite::Connection::open(&freq_path).map_err(|_e| Error::internal_error())?;
+      let placeholders = vec!["?"; candidate_words.len()].join(",");
 
       // Query with proper result limit
-      // TODO：add some basical frequency threshold
       let query = format!(
         "SELECT word FROM word_frequencies WHERE word IN ({}) ORDER BY frequency DESC LIMIT 5",
         placeholders
@@ -409,7 +469,7 @@ impl DictionaryProvider for SqliteDictionaryProvider {
       let mut stmt = conn.prepare(&query).map_err(|_| Error::internal_error())?;
 
       // Convert words to SQL parameters
-      let params: Vec<&dyn rusqlite::types::ToSql> = candidates_clone
+      let params: Vec<&dyn rusqlite::types::ToSql> = candidate_words
         .iter()
         .map(|w| w as &dyn rusqlite::types::ToSql)
         .collect();
@@ -431,10 +491,13 @@ impl DictionaryProvider for SqliteDictionaryProvider {
     .await
     .map_err(|_| Error::internal_error())??;
 
-    if batch_results.is_empty() {
-      Ok(None)
-    } else {
+    // Update cache with new results
+    if !batch_results.is_empty() {
+      *cache = (lowercase_prefix, batch_results.clone());
       Ok(Some(batch_results))
+    } else {
+      *cache = (String::new(), Vec::new());
+      Ok(None)
     }
   }
 }
@@ -444,14 +507,16 @@ pub struct JsonDictionaryProvider {
   dictionary_path: Option<String>,
   freq_path: Option<String>,
   dictionary_cache: tokio::sync::Mutex<Option<serde_json::Value>>,
+  prefix_cache: tokio::sync::Mutex<(String, Vec<String>)>,
 }
 
 impl JsonDictionaryProvider {
   pub fn new(dictionary_path: Option<String>, freq_path: Option<String>) -> Self {
-    let mut provider = Self {
+    let provider = Self {
       dictionary_path,
       freq_path,
       dictionary_cache: tokio::sync::Mutex::new(None),
+      prefix_cache: tokio::sync::Mutex::new((String::new(), Vec::new())),
     };
 
     // Eagerly load dictionary if path is available
@@ -637,6 +702,29 @@ impl DictionaryProvider for JsonDictionaryProvider {
       return Ok(None);
     }
 
+    // Check if we can use cached results
+    let mut cache = self.prefix_cache.lock().await;
+    let (cached_prefix, cached_results) = &*cache;
+
+    // If the new prefix extends the cached prefix, filter the cached results
+    if !cached_prefix.is_empty()
+      && prefix.to_lowercase().starts_with(cached_prefix)
+      && !cached_results.is_empty()
+    {
+      // Filter cached results that match the new prefix
+      let filtered: Vec<String> = cached_results
+        .iter()
+        .filter(|word| word.to_lowercase().starts_with(&prefix.to_lowercase()))
+        .cloned()
+        .collect();
+
+      // If we found matches, update cache and return
+      if !filtered.is_empty() {
+        *cache = (prefix.to_lowercase(), filtered.clone());
+        return Ok(Some(filtered));
+      }
+    }
+
     let dictionary = match &*self.dictionary_cache.lock().await {
       Some(dict) => dict.clone(),
       None => {
@@ -660,6 +748,7 @@ impl DictionaryProvider for JsonDictionaryProvider {
         .collect();
 
       if !matching_words.is_empty() {
+        *cache = (prefix_lower, matching_words.clone());
         return Ok(Some(matching_words));
       }
     }
@@ -667,8 +756,10 @@ impl DictionaryProvider for JsonDictionaryProvider {
     // If no direct matches are found, use fuzzy matching
     let candidates = fuzzy::generate_levenshtein_candidates(prefix, true).await;
     if candidates.is_empty() {
+      *cache = (String::new(), Vec::new()); // Clear cache on failure
       Ok(None)
     } else {
+      *cache = (prefix.to_lowercase(), candidates.clone());
       Ok(Some(candidates))
     }
   }
