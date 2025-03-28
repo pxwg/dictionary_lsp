@@ -388,8 +388,8 @@ mod tests {
 
   fn setup_test_handler() -> CompletionHandler {
     let document_map = Arc::new(Mutex::new(HashMap::new()));
-    let dict_path = "test_dict.db".to_string();
-    let freq_path = "test_freq.db".to_string();
+    let dict_path = "./test/test_dict.db".to_string();
+    let freq_path = "./test/test_freq.db".to_string();
 
     let handler = CompletionHandler::new(document_map, dict_path.clone(), freq_path.clone());
     #[cfg(test)]
