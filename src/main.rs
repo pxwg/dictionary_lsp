@@ -6,6 +6,7 @@ pub mod formatting;
 pub mod fuzzy;
 pub mod hover;
 pub mod signature_help;
+pub mod tire;
 
 fn main() {
   dictionary_lsp::run_server();
