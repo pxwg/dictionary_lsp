@@ -1,5 +1,6 @@
 use crate::completion::CompletionHandler;
 use crate::config::{self, Config};
+use crate::dictionary_data;
 use crate::hover::HoverHandler;
 use crate::signature_help::SignatureHelpHandler;
 use serde_json::Value;
@@ -245,6 +246,15 @@ impl DictionaryLsp {
 pub async fn run_server() {
   let stdin = tokio::io::stdin();
   let stdout = tokio::io::stdout();
+
+  // Initialize the global trie at startup
+  if let Some(freq_path) = Config::get().freq_path {
+    if let Err(e) = crate::tire::initialize_global_trie(&freq_path) {
+      eprintln!("Failed to initialize global trie: {:?}", e);
+    } else {
+      eprintln!("Global trie initialized successfully");
+    }
+  }
 
   let config = Config::load_from_disk();
   // eprint!(
