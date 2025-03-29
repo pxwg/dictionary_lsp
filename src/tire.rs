@@ -1,6 +1,7 @@
 use lru::LruCache;
 use once_cell::sync::Lazy;
 use rusqlite;
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::RwLock;
 use std::time::Instant;
@@ -8,9 +9,9 @@ use tower_lsp::jsonrpc::Error;
 use trie_rs::{Trie, TrieBuilder};
 
 // Global trie instances, split by frequency tiers
-pub static HIGH_FREQ_TRIE: Lazy<RwLock<Option<Trie<char>>>> = Lazy::new(|| RwLock::new(None));
-pub static MID_FREQ_TRIE: Lazy<RwLock<Option<Trie<char>>>> = Lazy::new(|| RwLock::new(None));
-pub static LOW_FREQ_TRIE: Lazy<RwLock<Option<Trie<char>>>> = Lazy::new(|| RwLock::new(None));
+pub static WORD_FREQUENCIES: Lazy<RwLock<HashMap<String, i64>>> =
+  Lazy::new(|| RwLock::new(HashMap::new()));
+pub static GLOBAL_TRIE: Lazy<RwLock<Option<Trie<char>>>> = Lazy::new(|| RwLock::new(None));
 static LAST_INIT_TIME: Lazy<RwLock<Option<Instant>>> = Lazy::new(|| RwLock::new(None));
 pub static PREFIX_CACHE: Lazy<RwLock<LruCache<String, Vec<String>>>> =
   Lazy::new(|| RwLock::new(LruCache::new(NonZeroUsize::new(1000).unwrap())));
@@ -24,10 +25,7 @@ pub fn initialize_global_trie(freq_path: &str) -> Result<(), Error> {
       return Ok(());
     }
   }
-
-  let mut high_builder = TrieBuilder::new();
-  let mut mid_builder = TrieBuilder::new();
-  let mut low_builder = TrieBuilder::new();
+  let mut builder = TrieBuilder::new();
 
   // Connect to the SQLite frequency database
   let conn = rusqlite::Connection::open(freq_path).map_err(|e| {
@@ -54,57 +52,24 @@ pub fn initialize_global_trie(freq_path: &str) -> Result<(), Error> {
 
   let start_time = Instant::now();
   let mut word_count = 0;
-  let mut high_count = 0;
-  let mut mid_count = 0;
-  let mut low_count = 0;
 
-  // Collect rows into a Vec to get the count and make them indexable
-  let rows: Vec<_> = rows.collect();
-  let total_words = rows.len();
-  let words_per_group = total_words / 3;
-
-  // Add words to tries, distributing them evenly
-  for (index, word_result) in rows.into_iter().enumerate() {
-    if let Ok((word, _freq)) = word_result {
+  // Add all words to the trie in frequency order (already sorted by SQL query)
+  for word_result in rows {
+    let mut freq_map = WORD_FREQUENCIES.write().unwrap();
+    if let Ok((word, freq)) = word_result {
       let chars: Vec<char> = word.chars().collect();
-
-      // Distribute words evenly across the three tries
-      if index < words_per_group {
-        // First third goes to high frequency
-        high_builder.push(&chars);
-        high_count += 1;
-      } else if index < words_per_group * 2 {
-        // Second third goes to medium frequency
-        mid_builder.push(&chars);
-        mid_count += 1;
-      } else {
-        // Final third goes to low frequency
-        low_builder.push(&chars);
-        low_count += 1;
-      }
-
+      builder.push(&chars);
+      freq_map.insert(word, freq);
       word_count += 1;
     }
   }
 
-  // Build the tries and store them globally
-  let high_trie = high_builder.build();
-  let mid_trie = mid_builder.build();
-  let low_trie = low_builder.build();
+  // Build the trie and store it globally
+  let trie = builder.build();
 
   {
-    let mut high_guard = HIGH_FREQ_TRIE.write().unwrap();
-    *high_guard = Some(high_trie);
-  }
-
-  {
-    let mut mid_guard = MID_FREQ_TRIE.write().unwrap();
-    *mid_guard = Some(mid_trie);
-  }
-
-  {
-    let mut low_guard = LOW_FREQ_TRIE.write().unwrap();
-    *low_guard = Some(low_trie);
+    let mut trie_guard = GLOBAL_TRIE.write().unwrap();
+    *trie_guard = Some(trie);
   }
 
   // Clear the cache when dictionary is reloaded
@@ -117,11 +82,8 @@ pub fn initialize_global_trie(freq_path: &str) -> Result<(), Error> {
   *last_time = Some(Instant::now());
 
   eprintln!(
-    "Tries initialized with {} words (high: {}, mid: {}, low: {}) in {:?}",
+    "Trie is initialized with {} words in {:?}",
     word_count,
-    high_count,
-    mid_count,
-    low_count,
     start_time.elapsed()
   );
 
@@ -130,7 +92,7 @@ pub fn initialize_global_trie(freq_path: &str) -> Result<(), Error> {
 
 /// Check if the trie is initialized
 pub fn is_trie_initialized() -> bool {
-  HIGH_FREQ_TRIE.read().unwrap().is_some()
+  GLOBAL_TRIE.read().unwrap().is_some()
 }
 
 /// Find words by prefix using the global trie
@@ -149,11 +111,7 @@ pub fn find_words_by_prefix(prefix: &str, limit: usize) -> Vec<String> {
   let mut results = Vec::with_capacity(limit); // Pre-allocate memory
 
   // Define the tries we'll search in priority order
-  let tries = [
-    &HIGH_FREQ_TRIE as &RwLock<Option<Trie<char>>>,
-    &MID_FREQ_TRIE,
-    &LOW_FREQ_TRIE,
-  ];
+  let tries = [&GLOBAL_TRIE as &RwLock<Option<Trie<char>>>];
 
   // Search each trie in order until we have enough results
   for trie_lock in tries {
@@ -164,15 +122,23 @@ pub fn find_words_by_prefix(prefix: &str, limit: usize) -> Vec<String> {
 
     // Search the current trie
     if let Some(trie) = trie_lock.read().unwrap().as_ref() {
-      let needed = limit - results.len();
-      let mut matches = trie
+      let matches = trie
         .predictive_search(&char_vec)
         .into_iter()
         .map(|chars: Vec<char>| chars.into_iter().collect::<String>())
-        .take(needed) // Only take what we need
+        // .take(needed) // Only take what we need
         .collect::<Vec<String>>();
 
-      results.append(&mut matches);
+      let freq_map = WORD_FREQUENCIES.read().unwrap();
+      let mut sorted_matches = matches;
+      sorted_matches.sort_by(|a, b| {
+        freq_map
+          .get(b)
+          .unwrap_or(&0)
+          .cmp(freq_map.get(a).unwrap_or(&0))
+      });
+
+      results.append(&mut sorted_matches);
     }
   }
 
