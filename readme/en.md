@@ -2,11 +2,11 @@
 
 <div align="center">
 
-[English Document](./readme/en.md) | [中文文档](./README.md)
+[English Document](./en.md) | [中文文档](../README.md)
 
 </div>
 
-A personal dictionary query tool, implemented with the LSP language server and `rust`.
+*Fast* Dictionary and English IM implementation based on LSP language server and `rust`.
 
 ## Introduction
 
