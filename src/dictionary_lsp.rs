@@ -46,7 +46,7 @@ impl LanguageServer for DictionaryLsp {
           work_done_progress_options: Default::default(),
         }),
         completion_provider: Some(CompletionOptions {
-          resolve_provider: Some(true),
+          resolve_provider: Some(true), // Explicitly enable resolve support
           completion_item: Some(CompletionOptionsCompletionItem {
             label_details_support: Some(true),
           }),

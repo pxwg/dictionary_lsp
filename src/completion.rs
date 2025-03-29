@@ -126,36 +126,15 @@ impl CompletionHandler {
     // Pre-allocate with capacity for better performance
     let mut items = Vec::with_capacity(words.len());
 
-    // Fetch all definitions concurrently using futures
-    use futures::future::join_all;
-    let meaning_futures: Vec<_> = words
-      .iter()
-      .map(|word| {
-        let provider_clone = dictionary_data::SqliteDictionaryProvider::new(
-          Some(self.dictionary_path.clone()),
-          Some(self.freq_path.clone()),
-        );
-        let word_clone = word.clone();
-        async move {
-          let meaning = provider_clone.get_meaning(&word_clone).await.ok().flatten();
-          (word_clone, meaning)
-        }
-      })
-      .collect();
-
-    // Wait for all futures to complete
-    let word_meanings = join_all(meaning_futures).await;
-
     // Check if the first letter of current_word is uppercase
     let starts_with_uppercase = current_word
       .chars()
       .next()
       .map_or(false, |c| c.is_uppercase());
 
-    // Process words and their meanings
-    for (word, meaning) in word_meanings {
+    // Process words without fetching meanings
+    for word in words {
       // Apply capitalization if needed
-      // Apply capitalization if needed - simplified logic
       let final_word = if starts_with_uppercase && !word.is_empty() {
         let mut capitalized = word.to_string();
         if let Some(first_char) = capitalized.get_mut(0..1) {
@@ -177,27 +156,17 @@ impl CompletionHandler {
         new_text: final_word.clone(),
       };
 
-      // let data = serde_json::to_value(word.clone()).unwrap_or_default();
+      // Store the original word as data for later resolution
+      let data = serde_json::to_value(word.clone()).unwrap_or_default();
 
-      // Create completion item with pre-fetched documentation if available
-      let mut item = CompletionItem {
+      // Create completion item without documentation (will be resolved later)
+      let item = CompletionItem {
         label: final_word.clone(),
         kind: Some(CompletionItemKind::KEYWORD),
         text_edit: Some(CompletionTextEdit::Edit(text_edit)),
-        // data: Some(data),
+        data: Some(data),
         ..Default::default()
       };
-
-      if let Some(meaning) = meaning {
-        let documentation = formatting::format_definition_as_markdown(&word, &meaning);
-
-        if !documentation.is_empty() {
-          item.documentation = Some(Documentation::MarkupContent(MarkupContent {
-            kind: MarkupKind::Markdown,
-            value: documentation,
-          }));
-        }
-      }
 
       items.push(item);
     }
@@ -339,27 +308,21 @@ impl CompletionHandler {
 
         // Get the meaning for the word
         if let Ok(Some(meaning)) = provider.get_meaning(&word).await {
-          let mut documentation = String::new();
+          // Use the formatting utility to create well-formatted markdown documentation
+          let documentation = formatting::format_definition_as_markdown(&word, &meaning);
 
-          // Format the meaning into Markdown for the documentation
-          for m in &meaning.meanings {
-            documentation.push_str(&format!("### {}\n\n", m.part_of_speech));
-
-            for (i, def) in m.definitions.iter().enumerate() {
-              documentation.push_str(&format!("{}. {}\n", i + 1, def.definition));
-              if let Some(example) = &def.example {
-                documentation.push_str(&format!("> {}\n\n", example));
-              }
-            }
-          }
-
-          // Add the documentation to the completion item
           if !documentation.is_empty() {
             item.documentation = Some(Documentation::MarkupContent(MarkupContent {
               kind: MarkupKind::Markdown,
               value: documentation,
             }));
+
+            // Remove the loading indicator now that we have the definition
+            item.detail = None;
           }
+        } else {
+          // If no definition found
+          item.detail = Some("No definition found".to_string());
         }
       }
     }
