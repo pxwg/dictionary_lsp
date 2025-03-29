@@ -183,7 +183,6 @@ pub fn find_words_by_prefix(prefix: &str, limit: usize) -> Vec<String> {
   results
 }
 
-/// Handles case sensitivity for prefix searches
 pub fn find_words_respecting_case(prefix: &str, limit: usize) -> Vec<String> {
   // Get lowercase results
   let results = find_words_by_prefix(&prefix.to_lowercase(), limit);
@@ -197,7 +196,12 @@ pub fn find_words_respecting_case(prefix: &str, limit: usize) -> Vec<String> {
         let mut chars = word.chars();
         match chars.next() {
           None => String::new(),
-          Some(first_char) => first_char.to_uppercase().collect::<String>() + chars.as_str(),
+          Some(first_char) => {
+            let mut result = String::with_capacity(word.len());
+            result.extend(first_char.to_uppercase());
+            result.push_str(chars.as_str());
+            result
+          }
         }
       })
       .collect()
