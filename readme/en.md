@@ -110,7 +110,7 @@ Here are some things I want to do; particularly desired ones are marked with ⭐
 - [x] Support for SQLite database⭐
 - [ ] Phrase lookup
 - [ ] Support for dictionary conversion from CSV and other formats
-- [x] More powerful fuzzy matching algorithms⭐(currently implemented with two solutions: SIMD acceleration and a trie tree. The latter depends on the `tire_rs` library, while the former is a custom maintained algorithm. Both maintain a response time of `100ns` in simple benchmarks, meeting actual completion requirements)
+- [x] More powerful fuzzy matching algorithms⭐(currently implemented with two solutions: SIMD acceleration and a trie tree. The latter depends on the `tire_rs` library, while the former is a custom maintained algorithm. Both maintain a response time of `10us` in simple benchmarks (`333333` words, Apple `M3` chip), meeting actual completion requirements)
 - [ ] Implement Neovim compatibility layer to actively add new words during file editing, track query frequency, etc. (highly dependent on SQLite implementation)⭐⭐⭐(very desired! but workload is rather large)
 
 ## Background
