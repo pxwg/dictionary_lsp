@@ -11,11 +11,11 @@
 ## Introduction
 
 <div align="center">
-  <img src="./fig/showcase_hover.png" alt="textDocument/hover example" width="80%">
+  <img src="../fig/showcase_hover.png" alt="textDocument/hover example" width="80%">
 </div>
 
 <div align="center">
-  <img src="./fig/showcase_sig.png" alt="textDocument/signatureHelp example" width="80%">
+  <img src="../fig/showcase_sig.png" alt="textDocument/signatureHelp example" width="80%">
 </div>
 
 Dictionary LSP is a dictionary query tool written in `rust` based on the LSP protocol. It can use `textDocument/hover` and `textDocument/signatureHelp` to help you quickly look up word definitions in editors that support the LSP protocol, such as Neovim. It also implements `texDocument/CompletionItem` with simple fuzzy matching for autocomplete (inspired by [blink-cmp-dictionary](https://github.com/Kaiser-Yang/blink-cmp-dictionary), though currently with slow response and in need of improved fuzzy matching speed and accuracy).
