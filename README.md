@@ -1,7 +1,7 @@
 # Dictionary LSP
 <div align="center">
 
-[English Document](./readme/en.md)
+[English Document](./readme/en.md) | [中文文档](./README.md)
 
 </div>
 
@@ -19,7 +19,7 @@
 
 Dictionary LSP 是一个使用 `rust` 编写的、基于 LSP 协议的字典查询工具，可以使用`textDocument/hover` 和 `textDocument/signatureHelp`帮助你在 neovim 等支持 LSP 协议的编辑器中快速查询单词释义，使用`texDocument/CompletionItem` 实现带简单 fuzzy matcher 的自动补全 (受到[blink-cmp-dictionary](https://github.com/Kaiser-Yang/blink-cmp-dictionary)的启发，但现在反应比较迟钝，并且需要强化模糊匹配的速度与精度)。
 
-**试试看！**当前主流的编辑器都具有极为简单的 LSP 支持，基于 LSP 的插件将会帮助你在一定程度上摆脱对编辑器插件的依赖，以编辑器的原生方式查询单词释义 (这通常是最为符合直觉的！)。
+__试试看！__ 当前主流的编辑器都具有极为简单的 LSP 支持，基于 LSP 的插件将会帮助你在一定程度上摆脱对编辑器插件的依赖，以编辑器的原生方式查询单词释义 (这通常是最为符合直觉的！)。
 
 这是一个随作者成长会不断更新的项目，之后会基于 LSP 的特性更新更多的功能😆
 
@@ -92,12 +92,13 @@ enabled = true
 
 - [x] 基本的单词查询功能
 - [x] 自定义 textDocument/hover 请求的返回文本格式⭐
-- [x] 支持 textDocument/signatureHelp 请求⭐(初步支持)
+- [x] 支持 textDocument/signatureHelp 请求⭐
 - [x] 模糊查找 (初步完成，之后会基于更为流行的模糊匹配库，但这同样依赖于 SQLite 的实现)  
-- [ ] 自动补全⭐(现在实现了基于*词频*的自动补全，代价是一个额外的 SQLite 数据库。通过小型库拿空间换时间)
+- [ ] 语法纠错⭐⭐(特别想实现！但是暂时还不知道要怎么做)
+- [ ] 自动补全⭐(现在实现了基于*词频*与*tire 树*的自动补全，代价是一个额外的 SQLite 数据库。通过小型库拿空间换时间)
     - [ ] 增加更符合直观的自动补全模式，包括
         - [x] 大小写匹配
-        - [ ] 词根匹配
+        - [x] 词根匹配
         - [ ] 超越词频搜索的模糊匹配
 - [ ] 添加单元测试⭐(特别想做，但可能会需要重构一下代码，抽象一下具体的业务逻辑)
     - [ ] Hover
@@ -108,7 +109,7 @@ enabled = true
 - [x] 支持 SQLite 数据库⭐
 - [ ] 短语查找
 - [ ] 支持 csv 等格式的字典转换
-- [ ] 更强大的模糊匹配算法⭐(SIMD 加速？仿射化的 Levenshtein 距离？都可以尝试尝试，总之不能局限在 SQLite 的模糊匹配上)
+- [x] 更强大的模糊匹配算法⭐(目前实现了 SIMD 加速和 tire 树两套解决方案，后者依赖于`tire_rs` 库，前者是自己维护的一个小算法，在简单的 benchmark 中都维持 `100ns` 的响应速度，符合实际补全的需求)
 - [ ] 实现 neovim 的兼容层，实现在文件编辑时主动添加生词、统计查询频率并调用等功能 (强烈依赖于 SQLite 的实现)⭐⭐⭐(特别想做！但是工程量有点大)
 
 ## 背景

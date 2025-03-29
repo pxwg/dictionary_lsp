@@ -1,5 +1,11 @@
 # Dictionary LSP
 
+<div align="center">
+
+[English Document](./readme/en.md) | [中文文档](./README.md)
+
+</div>
+
 A personal dictionary query tool, implemented with the LSP language server and `rust`.
 
 ## Introduction
@@ -90,10 +96,11 @@ Here are some things I want to do; particularly desired ones are marked with ⭐
 - [x] Custom text format for textDocument/hover responses⭐
 - [x] Support for textDocument/signatureHelp requests⭐(basic support)
 - [x] Fuzzy search (initially completed, will be based on more popular fuzzy matching libraries later, but this also depends on SQLite implementation)  
+- [ ] Grammar correction⭐⭐(particularly desired! but not sure how to implement it yet)
 - [ ] Autocomplete⭐(now implemented frequency-based autocomplete, at the cost of an extra SQLite database. Using small libraries to trade space for time)
     - [ ] Add more intuitive autocomplete modes, including
       - [x] Case matching
-      - [ ] Root word matching
+      - [x] Root word matching
       - [ ] Fuzzy matching beyond frequency-based search
 - [ ] Add unit tests⭐(particularly desired, but may require code refactoring, abstracting specific business logic)
     - [ ] Hover
@@ -103,7 +110,7 @@ Here are some things I want to do; particularly desired ones are marked with ⭐
 - [x] Support for SQLite database⭐
 - [ ] Phrase lookup
 - [ ] Support for dictionary conversion from CSV and other formats
-- [ ] More powerful fuzzy matching algorithms⭐(SIMD acceleration? Affine Levenshtein distance? Can try both, shouldn't be limited to SQLite's fuzzy matching)
+- [x] More powerful fuzzy matching algorithms⭐(currently implemented with two solutions: SIMD acceleration and a trie tree. The latter depends on the `tire_rs` library, while the former is a custom maintained algorithm. Both maintain a response time of `100ns` in simple benchmarks, meeting actual completion requirements)
 - [ ] Implement Neovim compatibility layer to actively add new words during file editing, track query frequency, etc. (highly dependent on SQLite implementation)⭐⭐⭐(very desired! but workload is rather large)
 
 ## Background
