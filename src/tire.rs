@@ -138,7 +138,7 @@ pub fn find_words_by_prefix(prefix: &str, limit: usize) -> Vec<String> {
           .cmp(freq_map.get(a).unwrap_or(&0))
       });
 
-      results.append(&mut sorted_matches);
+      results.extend(sorted_matches.into_iter().take(limit - results.len()));
     }
   }
 
