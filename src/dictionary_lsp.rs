@@ -252,7 +252,7 @@ pub async fn run_server() {
     if let Err(e) = crate::tire::initialize_global_trie(&freq_path) {
       eprintln!("Failed to initialize global trie: {:?}", e);
     } else {
-      eprintln!("Global trie initialized successfully");
+      // eprintln!("Global trie initialized successfully");
     }
   }
 
